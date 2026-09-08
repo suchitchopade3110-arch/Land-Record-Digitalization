@@ -1,0 +1,32 @@
+# TODO: FR-REV-01-16. Producer: Suchit (decision engine, both routed and audit streams —
+# audit-sample tasks must be visually identical to routed tasks, FR-REV-11). Consumer: Suchit
+# (review workbench, M9); also drains into LEARNING_LOOP_QUEUE on officer submit (Correction).
+asyncapi: 2.6.0
+info:
+  title: Review Queue
+  version: "0.1.0"
+channels:
+  REVIEW_QUEUE:
+    subscribe:
+      summary: Consumed by Suchit's review workbench backend (M9).
+      message:
+        $ref: '#/components/messages/ReviewEnvelope'
+    publish:
+      summary: Published by Suchit's decision engine for rule-failed / low-confidence / audit-sampled extractions.
+      message:
+        $ref: '#/components/messages/ReviewEnvelope'
+components:
+  messages:
+    ReviewEnvelope:
+      name: ReviewEnvelope
+      payload:
+        type: object
+        required: [message_id, trace_id, emitted_at, producer, work_envelope, payload]
+        properties:
+          message_id: { type: string, format: uuid }
+          trace_id: { type: string }
+          emitted_at: { type: string, format: date-time }
+          producer: { type: string, enum: [decision] }
+          work_envelope: { type: object, $ref: '../schemas/work_envelope.schema.json' }
+          payload:
+            $ref: '../schemas/review_task.schema.json'

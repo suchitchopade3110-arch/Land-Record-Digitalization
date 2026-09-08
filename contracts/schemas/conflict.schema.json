@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://land-record-system/schemas/conflict.schema.json",
+  "title": "Conflict",
+  "description": "TODO: FR-CFL-01-06. Suchit owns storage/workflow; Shruthi's validators are the primary producer. Owner: Suchit (services/backend).",
+  "type": "object",
+  "required": ["id", "records", "rule", "evidence", "origin", "state", "opened_at"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "format": "uuid" },
+    "records": { "type": "array", "items": { "type": "string", "format": "uuid" }, "description": "record_id[]" },
+    "rule": { "type": "string", "description": "e.g. 'lineage: transferor mismatch'" },
+    "evidence": {
+      "type": "object",
+      "required": ["validation_result_ids", "source_images"],
+      "additionalProperties": false,
+      "properties": {
+        "validation_result_ids": { "type": "array", "items": { "type": "string", "format": "uuid" } },
+        "source_images": { "type": "array", "items": { "type": "string", "format": "uri" } }
+      }
+    },
+    "origin": { "type": "string", "enum": ["validator", "downstream"] },
+    "state": { "type": "string", "enum": ["open", "under_enquiry", "resolved", "referred"] },
+    "assignee": { "type": ["string", "null"] },
+    "opened_at": { "type": "string", "format": "date-time" }
+  }
+}

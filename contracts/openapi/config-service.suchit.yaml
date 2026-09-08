@@ -1,0 +1,47 @@
+# TODO: FR-CFG-01/02, FR-CFG-04. Owner: Suchit (services/backend). Callers: Shree, Shruthi, Tharun.
+# Callers must cache with config_version as the cache key and invalidate on version change —
+# never poll on a timer as the sole mechanism (API-Contracts §4.1).
+openapi: 3.0.3
+info:
+  title: Config Service
+  version: "0.1.0"
+  description: >
+    Synchronous read API over ConfigVersion (district unit tables, validator
+    tolerances, error policy, schema definitions). See API-Contracts-and-Interfaces.md §4.1.
+paths:
+  /config/{scope}/{key}:
+    get:
+      operationId: getConfig
+      summary: Read the active value for a config key at a given scope.
+      parameters:
+        - name: scope
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [district, state, global]
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [key, value, config_version, effective_from]
+                properties:
+                  key:
+                    type: string
+                  value:
+                    type: object
+                  config_version:
+                    type: string
+                  effective_from:
+                    type: string
+                    format: date-time
+        "404":
+          description: No config value found for this scope/key.

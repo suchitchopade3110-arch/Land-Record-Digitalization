@@ -1,0 +1,50 @@
+name: contract-tests
+
+# Runs on every PR that touches contracts/ or a service's schema usage —
+# catches schema drift before it merges (Skeleton-Prompt.md §1/§6).
+on:
+  pull_request:
+    paths:
+      - "contracts/**"
+      - "services/**/models/**"
+      - "services/**/tests/contract/**"
+      - "tests/contract/**"
+  push:
+    branches: [main]
+
+jobs:
+  contract-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install test dependencies
+        run: pip install pytest jsonschema pyyaml
+
+      - name: Install shared libs + all services
+        # Per-service contract tests import their own service package (and
+        # observability) — install everything up front rather than
+        # per-service, since this job (unlike ci.yml) isn't matrixed.
+        run: |
+          pip install -e libs/observability
+          for svc in backend extraction validation modelwork; do
+            pip install -e "services/$svc"
+          done
+
+      - name: Run root contract tests
+        run: pytest tests/contract -v
+
+      - name: Run per-service contract tests
+        run: |
+          for svc in backend extraction validation modelwork; do
+            echo "::group::services/$svc/tests/contract"
+            pytest "services/$svc/tests/contract" -v
+            echo "::endgroup::"
+          done
+
+      - name: Run libs/observability tests
+        run: pytest libs/observability/tests -v

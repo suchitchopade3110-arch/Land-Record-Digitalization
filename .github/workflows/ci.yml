@@ -1,0 +1,42 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  lint-and-unit-test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [backend, extraction, validation, modelwork]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install service + shared libs
+        run: |
+          pip install -e libs/observability
+          pip install -e "services/${{ matrix.service }}"
+          pip install pytest ruff
+
+      - name: Lint
+        run: ruff check "services/${{ matrix.service }}/src"
+
+      - name: Unit tests
+        run: pytest "services/${{ matrix.service }}/tests/unit" -v
+
+  route-registry-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate route_registry.yaml is well-formed
+        run: python -c "import yaml; yaml.safe_load(open('gateway/route_registry.yaml'))"
+      # TODO: extend this into the real drift check described in
+      # Skeleton-Prompt.md §2 — diff each service's live OpenAPI spec
+      # (FastAPI's /openapi.json) against gateway/route_registry.yaml and
+      # fail the build on any undocumented path, once services boot in CI.

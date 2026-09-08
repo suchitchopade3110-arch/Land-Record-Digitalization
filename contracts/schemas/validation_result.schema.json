@@ -1,0 +1,37 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://land-record-system/schemas/validation_result.schema.json",
+  "title": "ValidationResult",
+  "description": "TODO: FR-VAL-01-09. Shruthi writes; Suchit's decision engine and Tharun's calibrator read. Highest-traffic contract between Shree/Shruthi/Tharun — schema changes require sign-off from all three.",
+  "type": "object",
+  "required": ["id", "record_id", "validator", "verdict", "reason_code", "fields", "config_version", "consumed_constraints"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "format": "uuid" },
+    "record_id": { "type": "string", "format": "uuid" },
+    "validator": {
+      "type": "string",
+      "enum": ["syntactic", "arithmetic", "referential", "lineage", "geospatial", "legacy_reconciliation"]
+    },
+    "verdict": { "type": "string", "enum": ["pass", "fail", "not_applicable"] },
+    "reason_code": { "type": "string", "description": "e.g. SHARE_OVERSUM, SHARE_UNDERSUM, AREA_DISAGREES, UNIT_TABLE_UNVERIFIED" },
+    "fields": { "type": "array", "items": { "type": "string", "format": "uuid" }, "description": "extraction_id[]" },
+    "config_version": { "type": "string" },
+    "consumed_constraints": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "FR-VAL-09 — non-empty list forces verdict = not_applicable. Hard invariant enforced at the DB layer by Suchit; Shruthi's code must never try to violate it."
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "consumed_constraints": { "minItems": 1 } },
+        "required": ["consumed_constraints"]
+      },
+      "then": {
+        "properties": { "verdict": { "const": "not_applicable" } }
+      }
+    }
+  ]
+}

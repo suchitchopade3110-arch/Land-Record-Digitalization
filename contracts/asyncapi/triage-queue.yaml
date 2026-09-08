@@ -1,0 +1,35 @@
+# TODO: FR-ING-03, FR-TRI-05/09. Producer: Suchit (ingest). Consumers: Suchit (router) +
+# Tharun (triage classifiers run as part of triage). Payload: Page (pre-classification fields
+# only) on the way in; Suchit's router re-publishes the fully-classified Page + pinned
+# WorkEnvelope onward to TEXT_QUEUE / MAP_QUEUE. See API-Contracts §5, Architecture §7/§9.
+asyncapi: 2.6.0
+info:
+  title: Triage Queue
+  version: "0.1.0"
+channels:
+  TRIAGE_QUEUE:
+    subscribe:
+      summary: Consumed by Suchit's triage router and Tharun's triage classifiers (legibility, script/lang, doc-type, page-role, writer clustering).
+      message:
+        $ref: '#/components/messages/TriageEnvelope'
+    publish:
+      summary: Published by Suchit's ingest stage after page split.
+      message:
+        $ref: '#/components/messages/TriageEnvelope'
+components:
+  messages:
+    TriageEnvelope:
+      name: TriageEnvelope
+      payload:
+        type: object
+        required: [message_id, trace_id, emitted_at, producer, payload]
+        properties:
+          message_id: { type: string, format: uuid }
+          trace_id: { type: string, description: "document_id:page_id" }
+          emitted_at: { type: string, format: date-time }
+          producer: { type: string, enum: [ingest, triage] }
+          work_envelope:
+            type: object
+            description: "Absent on ingest->triage; present once the router pins it for the outbound hop to text/map lanes."
+          payload:
+            $ref: '../schemas/page.schema.json'

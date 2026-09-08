@@ -1,0 +1,22 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://land-record-system/schemas/parcel_geometry.schema.json",
+  "title": "ParcelGeometry",
+  "description": "TODO: FR-MAP-01-04, FR-MAP-09/11/12. Shree writes; Shruthi reads for geospatial validation. Owner: Shree (services/extraction).",
+  "type": "object",
+  "required": ["id", "page_id", "polygon", "crs", "area_computed", "control_points", "georef_rmse", "transform_type", "ulpin_eligible"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "format": "uuid" },
+    "page_id": { "type": "string", "format": "uuid" },
+    "polygon": { "type": "object", "description": "geometry(Polygon, CRS) — GeoJSON-shaped in transit" },
+    "crs": { "type": "string" },
+    "area_computed": { "type": "string", "description": "decimal, exact — never floating point for comparisons (§1 conventions)" },
+    "control_points": { "type": "integer" },
+    "georef_rmse": { "type": "number" },
+    "transform_type": { "type": "string" },
+    "ulpin_eligible": { "type": "boolean", "description": "FR-MAP-05 — RMSE below stricter threshold" },
+    "bound_survey_no": { "type": ["string", "null"] },
+    "conflation_lineage_ref": { "type": ["string", "null"], "format": "uuid", "description": "FR-MAP-12" }
+  }
+}

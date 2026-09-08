@@ -1,0 +1,46 @@
+# TODO: FR-LRN-04. Owner: Tharun (services/modelwork). Callers: Suchit (pin work envelope at
+# triage), Shree (resolve adapter_ref for a writer cluster). See API-Contracts §4.2.
+# Returns the currently promoted version only — once pinned into a WorkEnvelope, nothing
+# downstream calls this again for that page (idempotence guarantee, §2/§7 rule 1).
+openapi: 3.0.3
+info:
+  title: Model Registry
+  version: "0.1.0"
+paths:
+  /models/{module}/active:
+    get:
+      operationId: getActiveModel
+      summary: Read the currently promoted model version for a module.
+      parameters:
+        - name: module
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: writer_cluster_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: stratum
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [model_version]
+                properties:
+                  model_version:
+                    type: string
+                  adapter_ref:
+                    type: string
+                    nullable: true
+        "404":
+          description: No promoted model for this module.

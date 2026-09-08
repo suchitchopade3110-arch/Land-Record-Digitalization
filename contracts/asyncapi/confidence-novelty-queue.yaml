@@ -1,0 +1,43 @@
+# TODO: FR-CNF-01/02/04/14. Producer: Shruthi (validation + entity-res results join here).
+# Consumer: Tharun. Payload: ValidationResult[] + dedup match candidates. Tharun computes
+# novelty FIRST (gates everything else), then per-stratum calibrated confidence, then emits
+# to DECISION_QUEUE. See API-Contracts §5, Architecture §14.
+asyncapi: 2.6.0
+info:
+  title: Confidence & Novelty Queue
+  version: "0.1.0"
+channels:
+  CONFIDENCE_NOVELTY_QUEUE:
+    subscribe:
+      summary: Consumed by Tharun's confidence calibrator + novelty detector.
+      message:
+        $ref: '#/components/messages/ConfidenceNoveltyEnvelope'
+    publish:
+      summary: Published once Shruthi's validation and entity-resolution results for a record are both available.
+      message:
+        $ref: '#/components/messages/ConfidenceNoveltyEnvelope'
+components:
+  messages:
+    ConfidenceNoveltyEnvelope:
+      name: ConfidenceNoveltyEnvelope
+      payload:
+        type: object
+        required: [message_id, trace_id, emitted_at, producer, work_envelope, payload]
+        properties:
+          message_id: { type: string, format: uuid }
+          trace_id: { type: string }
+          emitted_at: { type: string, format: date-time }
+          producer: { type: string, enum: [validation, entity-res] }
+          work_envelope: { type: object, $ref: '../schemas/work_envelope.schema.json' }
+          payload:
+            type: object
+            required: [validation_results]
+            properties:
+              validation_results:
+                type: array
+                items:
+                  $ref: '../schemas/validation_result.schema.json'
+              dedup_match_candidates:
+                type: array
+                items:
+                  type: object

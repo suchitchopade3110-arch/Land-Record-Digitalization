@@ -1,0 +1,32 @@
+# TODO: FR-CFL-01-06. Producer: Shruthi's validators (lineage/geospatial contradictions) or
+# Suchit (downstream defect re-entry, FR-PUB-07). Consumer: Suchit (conflict register, M10 —
+# publication BLOCKED until resolved). See Architecture §15/§19.
+asyncapi: 2.6.0
+info:
+  title: Conflict Queue
+  version: "0.1.0"
+channels:
+  CONFLICT_QUEUE:
+    subscribe:
+      summary: Consumed by Suchit's conflict register (M10).
+      message:
+        $ref: '#/components/messages/ConflictEnvelope'
+    publish:
+      summary: Published by Suchit's decision engine (validator-raised contradiction) or the publication layer (downstream defect, origin=downstream).
+      message:
+        $ref: '#/components/messages/ConflictEnvelope'
+components:
+  messages:
+    ConflictEnvelope:
+      name: ConflictEnvelope
+      payload:
+        type: object
+        required: [message_id, trace_id, emitted_at, producer, work_envelope, payload]
+        properties:
+          message_id: { type: string, format: uuid }
+          trace_id: { type: string }
+          emitted_at: { type: string, format: date-time }
+          producer: { type: string, enum: [decision, publication] }
+          work_envelope: { type: object, $ref: '../schemas/work_envelope.schema.json' }
+          payload:
+            $ref: '../schemas/conflict.schema.json'

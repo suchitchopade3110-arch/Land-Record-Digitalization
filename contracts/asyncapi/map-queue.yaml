@@ -1,0 +1,36 @@
+# TODO: FR-MAP-01-04/09/11/12. Producer/Consumer: Shree (map lane, genuinely parallel to the
+# text lane — a page routes to text, map, or both; the map queue is simply never populated for
+# a page with no map content). Payload: ParcelGeometry[]. See Architecture §7/§11.
+asyncapi: 2.6.0
+info:
+  title: Map Queue
+  version: "0.1.0"
+channels:
+  MAP_QUEUE:
+    subscribe:
+      summary: Consumed internally by Shree's assembly step.
+      message:
+        $ref: '#/components/messages/MapLaneEnvelope'
+    publish:
+      summary: Published by Suchit's triage router and re-published by Shree's georeference/vectorize pipeline with ParcelGeometry[] on the way to assembly.
+      message:
+        $ref: '#/components/messages/MapLaneEnvelope'
+components:
+  messages:
+    MapLaneEnvelope:
+      name: MapLaneEnvelope
+      payload:
+        type: object
+        required: [message_id, trace_id, emitted_at, producer, work_envelope, payload]
+        properties:
+          message_id: { type: string, format: uuid }
+          trace_id: { type: string }
+          emitted_at: { type: string, format: date-time }
+          producer: { type: string, enum: [triage, map-lane] }
+          work_envelope:
+            type: object
+            $ref: '../schemas/work_envelope.schema.json'
+          payload:
+            type: array
+            items:
+              $ref: '../schemas/parcel_geometry.schema.json'

@@ -1,0 +1,61 @@
+# gateway/route_registry.yaml
+#
+# The answer to "where does this endpoint live." Generated into the gateway's
+# routing config AND rendered as a human-readable table in the repo README,
+# so it never drifts from what's actually deployed.
+#
+# Rule: if you add an endpoint, add a row here in the same PR. CI
+# (.github/workflows/contract-tests.yml) fails the build if a service exposes
+# a path not listed here — see Skeleton-Prompt.md §2.
+routes:
+  - path: /config/{scope}/{key}
+    method: GET
+    owner: suchit
+    service: backend
+    kind: sync-api
+    contract: contracts/openapi/config-service.suchit.yaml
+    callers: [shree, shruthi, tharun]
+
+  - path: /models/{module}/active
+    method: GET
+    owner: tharun
+    service: modelwork
+    kind: sync-api
+    contract: contracts/openapi/model-registry.tharun.yaml
+    callers: [suchit, shree]
+
+  - path: /closed-sets/{type}
+    method: GET
+    owner: [suchit, shruthi]
+    service: backend
+    kind: sync-api
+    contract: contracts/openapi/closed-sets.suchit-shruthi.yaml
+    callers: [shree]
+    note: "never exposes LRMS-derived sets — schema/LGD only, FR-VAL-09"
+
+  - path: /documents
+    method: POST
+    owner: suchit
+    service: backend
+    kind: rest
+    note: "ingest entrypoint (M1) — client uploads land here, gets a job id back, never blocks"
+
+  - path: /review-tasks
+    method: GET
+    owner: suchit
+    service: backend
+    kind: rest
+    note: "reasons rendered come from shruthi (rule failures) and tharun (calibrator features) — backend must render both identically, FR-REV-11"
+
+  - path: /conflicts
+    method: GET
+    owner: suchit
+    service: backend
+    kind: rest
+
+  - path: /dashboard/metrics
+    method: GET
+    owner: suchit
+    service: backend
+    kind: rest
+    note: "figures derived only from audit log — no second source of truth, FR-ANL-01/07"

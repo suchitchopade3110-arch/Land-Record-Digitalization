@@ -1,0 +1,33 @@
+# TODO: FR-PUB-01-09. Producer: Suchit (decision engine, cleared/resolved fields only).
+# Consumer: Suchit (publication adapters — LRMS/DILRMP/GIS, each independently swappable
+# behind one interface, mocked at P0). See Architecture §19.
+asyncapi: 2.6.0
+info:
+  title: Publication Queue
+  version: "0.1.0"
+channels:
+  PUBLICATION_QUEUE:
+    subscribe:
+      summary: Consumed by Suchit's publication adapters (LRMS/DILRMP/GIS), mocked at P0 (FR-PUB-04).
+      message:
+        $ref: '#/components/messages/PublicationEnvelope'
+    publish:
+      summary: Published by Suchit's decision engine once a field/record is cleared for the verified record (M12).
+      message:
+        $ref: '#/components/messages/PublicationEnvelope'
+components:
+  messages:
+    PublicationEnvelope:
+      name: PublicationEnvelope
+      payload:
+        type: object
+        required: [message_id, trace_id, emitted_at, producer, work_envelope, payload]
+        properties:
+          message_id: { type: string, format: uuid }
+          trace_id: { type: string }
+          emitted_at: { type: string, format: date-time }
+          producer: { type: string, enum: [decision] }
+          work_envelope: { type: object, $ref: '../schemas/work_envelope.schema.json' }
+          payload:
+            type: object
+            description: Masked-per-M15 verified record version, versioned and never overwritten (FR-PUB-01).

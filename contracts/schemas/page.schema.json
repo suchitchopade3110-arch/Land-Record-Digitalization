@@ -1,0 +1,36 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://land-record-system/schemas/page.schema.json",
+  "title": "Page",
+  "description": "TODO: FR-ING-03/FR-TRI-01..05/09/11. Suchit writes the record; Tharun's triage classifiers (services/modelwork) populate the starred fields (quality_score, legibility_band, script, language, doc_type, page_role, writer_cluster_id, novelty_score). Owner: Suchit (services/backend).",
+  "type": "object",
+  "required": ["id", "document_id", "index"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "format": "uuid" },
+    "document_id": { "type": "string", "format": "uuid" },
+    "index": { "type": "integer" },
+    "index_position": { "type": ["integer", "null"], "description": "FR-ING-08 — register's own printed page number" },
+    "quality_score": { "type": ["number", "null"], "description": "*Tharun — FR-TRI-01" },
+    "legibility_band": { "type": ["string", "null"], "enum": ["good", "marginal", "poor", null], "description": "*Tharun — FR-TRI-10" },
+    "script": { "type": ["string", "null"], "description": "*Tharun — FR-TRI-02" },
+    "language": { "type": ["string", "null"], "description": "*Tharun" },
+    "doc_type": {
+      "type": ["string", "null"],
+      "enum": ["ror", "jamabandi", "khasra_khatauni", "mutation_register", "deed", "cadastral_map", "fmb_sketch", "unknown", null],
+      "description": "*Tharun — FR-TRI-03"
+    },
+    "page_role": {
+      "type": ["string", "null"],
+      "enum": ["text", "tabular_register", "map_sheet", "endorsement", "blank", null],
+      "description": "*Tharun — FR-TRI-04"
+    },
+    "writer_cluster_id": { "type": ["string", "null"], "format": "uuid", "description": "*Tharun — FR-TRI-11" },
+    "novelty_score": { "type": ["number", "null"], "description": "*Tharun — FR-CNF-14, pre-score at triage; refined post-extraction" },
+    "route": {
+      "type": "array",
+      "items": { "type": "string", "enum": ["text", "map"] },
+      "description": "computed from doc_type + page_role — FR-TRI-05"
+    }
+  }
+}

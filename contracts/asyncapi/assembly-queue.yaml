@@ -1,0 +1,39 @@
+# TODO: FR-EXT-04. Producer: Shree (text+map lanes rejoin here). Consumer: Shree (normalize is
+# still Shree's module). Payload: RecordAssembly + raw Extraction[]. See API-Contracts §5.
+asyncapi: 2.6.0
+info:
+  title: Assembly Queue
+  version: "0.1.0"
+channels:
+  ASSEMBLY_QUEUE:
+    subscribe:
+      summary: Consumed internally by Shree's normalize step.
+      message:
+        $ref: '#/components/messages/AssemblyEnvelope'
+    publish:
+      summary: Published by Shree once text-lane and/or map-lane output for a page is available.
+      message:
+        $ref: '#/components/messages/AssemblyEnvelope'
+components:
+  messages:
+    AssemblyEnvelope:
+      name: AssemblyEnvelope
+      payload:
+        type: object
+        required: [message_id, trace_id, emitted_at, producer, work_envelope, payload]
+        properties:
+          message_id: { type: string, format: uuid }
+          trace_id: { type: string }
+          emitted_at: { type: string, format: date-time }
+          producer: { type: string, enum: [assembly] }
+          work_envelope: { type: object, $ref: '../schemas/work_envelope.schema.json' }
+          payload:
+            type: object
+            required: [record_assembly, extractions]
+            properties:
+              record_assembly:
+                $ref: '../schemas/record_assembly.schema.json'
+              extractions:
+                type: array
+                items:
+                  $ref: '../schemas/extraction.schema.json'
