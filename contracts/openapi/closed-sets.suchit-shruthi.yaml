@@ -1,0 +1,43 @@
+# TODO: FR-VAL-09, FR-OCR-07, FR-OCR-09 (blocked on PRD §11 Q3). Owner: Suchit/Shruthi jointly.
+# Caller: Shree, for gazetteer re-ranking. This endpoint is the corpus partition rule made
+# concrete — it must NEVER expose LRMS-derived sets, only LGD/schema sets (API-Contracts §4.3).
+# If Shree ever needs a set this endpoint won't return, that is FR-OCR-09 gated on §11 Q3 —
+# it does not mean "add another field to this API."
+openapi: 3.0.3
+info:
+  title: Closed-Set Lookup
+  version: "0.1.0"
+paths:
+  /closed-sets/{type}:
+    get:
+      operationId: getClosedSet
+      summary: Read a closed set (schema- or LGD-derived only, never LRMS-derived) for gazetteer re-ranking.
+      parameters:
+        - name: type
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: district
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [codes, source, config_version]
+                properties:
+                  codes:
+                    type: array
+                    items:
+                      type: string
+                  source:
+                    type: string
+                    enum: [schema, lgd]
+                  config_version:
+                    type: string

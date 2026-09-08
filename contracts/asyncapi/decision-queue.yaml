@@ -1,0 +1,32 @@
+# TODO: FR-CNF-04, FR-CFL-01. Producer: Tharun (calibrated_confidence, novelty_score,
+# routing_outcome set on the Extraction). Consumer: Suchit (decision engine — internal
+# routing to review/conflict/publish; 5 outcomes, not 3, see Architecture §15).
+asyncapi: 2.6.0
+info:
+  title: Decision Queue
+  version: "0.1.0"
+channels:
+  DECISION_QUEUE:
+    subscribe:
+      summary: Consumed by Suchit's decision engine, which fans out to REVIEW_QUEUE / CONFLICT_QUEUE / PUBLICATION_QUEUE.
+      message:
+        $ref: '#/components/messages/DecisionEnvelope'
+    publish:
+      summary: Published by Tharun's confidence & novelty engine.
+      message:
+        $ref: '#/components/messages/DecisionEnvelope'
+components:
+  messages:
+    DecisionEnvelope:
+      name: DecisionEnvelope
+      payload:
+        type: object
+        required: [message_id, trace_id, emitted_at, producer, work_envelope, payload]
+        properties:
+          message_id: { type: string, format: uuid }
+          trace_id: { type: string }
+          emitted_at: { type: string, format: date-time }
+          producer: { type: string, enum: [confidence-novelty] }
+          work_envelope: { type: object, $ref: '../schemas/work_envelope.schema.json' }
+          payload:
+            $ref: '../schemas/extraction.schema.json'

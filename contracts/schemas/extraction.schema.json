@@ -1,0 +1,64 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://land-record-system/schemas/extraction.schema.json",
+  "title": "Extraction",
+  "description": "TODO: FR-EXT-01/02, FR-OCR-04/05, FR-CNF-01/02/14. Shree writes most fields; Tharun writes confidence/novelty/routing; Suchit owns the table. Highest-traffic contract in the system — schema changes require sign-off from Suchit, Shree, and Tharun.",
+  "type": "object",
+  "required": ["id", "page_id", "field_name", "raw_value", "engine", "model_version", "config_version", "token_confidence", "entry_status"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "format": "uuid" },
+    "page_id": { "type": "string", "format": "uuid" },
+    "field_name": { "type": "string" },
+    "raw_value": { "type": "string", "description": "Shree — never overwritten (FR-NRM-05)" },
+    "canonical_value": { "type": ["string", "null"], "description": "Shree, post-normalization" },
+    "unconstrained_value": { "type": ["string", "null"], "description": "Shree — FR-OCR-07, reading before gazetteer re-rank" },
+    "bbox": {
+      "type": ["object", "null"],
+      "description": "Shree — original-image coordinates, FR-OCR-04",
+      "required": ["x", "y", "w", "h"],
+      "additionalProperties": false,
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "w": { "type": "number" },
+        "h": { "type": "number" }
+      }
+    },
+    "engine": { "type": "string", "enum": ["printed_ocr", "hwr", "table_extractor"] },
+    "model_version": { "type": "string" },
+    "config_version": { "type": "string" },
+    "token_confidence": { "type": "number", "description": "Shree" },
+    "calibrated_confidence": { "type": ["number", "null"], "description": "Tharun — FR-CNF-01/02, null until scored" },
+    "novelty_score": { "type": ["number", "null"], "description": "Tharun — FR-CNF-14" },
+    "routing_outcome": {
+      "type": ["string", "null"],
+      "enum": ["auto_accept", "audit_sample", "review", "conflict", "outside_calibrated_regime", null],
+      "description": "Tharun writes, Suchit's decision engine consumes"
+    },
+    "entry_status": {
+      "type": "string",
+      "enum": ["unknown", "live", "cancelled", "superseded", "amended"],
+      "default": "unknown",
+      "description": "Shree — FR-EXT-06/07. MUST default to unknown, NEVER live as a row default — schema-level safety property, not a UI concern."
+    },
+    "attestation_refs": {
+      "type": "array",
+      "items": { "type": "string", "format": "uuid" },
+      "description": "Shree — FR-EXT-08"
+    },
+    "top_k": {
+      "type": "array",
+      "description": "Shree — FR-OCR-06",
+      "items": {
+        "type": "object",
+        "required": ["value", "confidence"],
+        "additionalProperties": false,
+        "properties": {
+          "value": { "type": "string" },
+          "confidence": { "type": "number" }
+        }
+      }
+    }
+  }
+}

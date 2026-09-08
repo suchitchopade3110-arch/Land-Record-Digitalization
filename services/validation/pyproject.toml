@@ -1,0 +1,15 @@
+[project]
+name = "validation"
+version = "0.1.0"
+description = "Shruthi — Validation + Entity Resolution, M6 (six validators) and M7 (entity resolution)."
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.110",
+  "uvicorn[standard]>=0.29",
+  "pydantic>=2.0",
+  "observability",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"

@@ -1,0 +1,42 @@
+# TODO: FR-ENT-01-05. Producer: Shree (via normalization fan-out). Consumer: Shruthi (entity
+# resolution — multi-pass blocking, distinct mechanism from validation, never a lookup).
+# Payload: canonical Extraction[] + ParcelGeometry. See API-Contracts §5, Architecture §12.
+asyncapi: 2.6.0
+info:
+  title: Entity Resolution Queue
+  version: "0.1.0"
+channels:
+  ENTITY_RES_QUEUE:
+    subscribe:
+      summary: Consumed by Shruthi's entity-resolution pipeline (perceptual-hash rescan detection, multi-pass parcel de-dup, person matching).
+      message:
+        $ref: '#/components/messages/EntityResEnvelope'
+    publish:
+      summary: Published by Shree's normalize step (fan-out sibling of VALIDATION_QUEUE).
+      message:
+        $ref: '#/components/messages/EntityResEnvelope'
+components:
+  messages:
+    EntityResEnvelope:
+      name: EntityResEnvelope
+      payload:
+        type: object
+        required: [message_id, trace_id, emitted_at, producer, work_envelope, payload]
+        properties:
+          message_id: { type: string, format: uuid }
+          trace_id: { type: string }
+          emitted_at: { type: string, format: date-time }
+          producer: { type: string, enum: [normalize] }
+          work_envelope: { type: object, $ref: '../schemas/work_envelope.schema.json' }
+          payload:
+            type: object
+            required: [extractions]
+            properties:
+              extractions:
+                type: array
+                items:
+                  $ref: '../schemas/extraction.schema.json'
+              parcel_geometries:
+                type: array
+                items:
+                  $ref: '../schemas/parcel_geometry.schema.json'

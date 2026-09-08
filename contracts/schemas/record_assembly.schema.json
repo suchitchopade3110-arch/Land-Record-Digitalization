@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://land-record-system/schemas/record_assembly.schema.json",
+  "title": "RecordAssembly",
+  "description": "TODO: FR-EXT-04. Shree writes. Owner: Shree (services/extraction).",
+  "type": "object",
+  "required": ["id", "record_id", "extraction_ids", "strategy", "rationale", "actor"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "format": "uuid" },
+    "record_id": { "type": "string", "format": "uuid" },
+    "extraction_ids": { "type": "array", "items": { "type": "string", "format": "uuid" } },
+    "strategy": { "type": "string", "enum": ["single_page", "continuation", "carried_forward"] },
+    "rationale": { "type": "string" },
+    "actor": { "type": "string", "description": "'system' or an operator_id" }
+  }
+}

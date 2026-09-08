@@ -1,0 +1,15 @@
+[project]
+name = "modelwork"
+version = "0.1.0"
+description = "Tharun B L — triage classifiers, confidence/novelty engine, learning loop (M2-classifiers, M8, M11)."
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.110",
+  "uvicorn[standard]>=0.29",
+  "pydantic>=2.0",
+  "observability",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"

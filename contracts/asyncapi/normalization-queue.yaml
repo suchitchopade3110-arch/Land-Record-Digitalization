@@ -1,0 +1,43 @@
+# TODO: FR-NRM-01-07, FR-VAL-01, FR-ENT-01. Producer: Shree. Consumers: Shruthi (validation
+# AND entity-resolution — these are genuinely parallel, see Architecture §7 correction).
+# Payload: canonical Extraction[] (+ ParcelGeometry for entity-res). raw_value is never
+# overwritten (FR-NRM-05).
+asyncapi: 2.6.0
+info:
+  title: Normalization Queue
+  version: "0.1.0"
+channels:
+  NORMALIZATION_QUEUE:
+    subscribe:
+      summary: Fans out to Shruthi's VALIDATION_QUEUE and ENTITY_RES_QUEUE consumers in parallel — neither blocks the other.
+      message:
+        $ref: '#/components/messages/NormalizationEnvelope'
+    publish:
+      summary: Published by Shree after raw -> normalized -> canonical conversion.
+      message:
+        $ref: '#/components/messages/NormalizationEnvelope'
+components:
+  messages:
+    NormalizationEnvelope:
+      name: NormalizationEnvelope
+      payload:
+        type: object
+        required: [message_id, trace_id, emitted_at, producer, work_envelope, payload]
+        properties:
+          message_id: { type: string, format: uuid }
+          trace_id: { type: string }
+          emitted_at: { type: string, format: date-time }
+          producer: { type: string, enum: [normalize] }
+          work_envelope: { type: object, $ref: '../schemas/work_envelope.schema.json' }
+          payload:
+            type: object
+            required: [extractions]
+            properties:
+              extractions:
+                type: array
+                items:
+                  $ref: '../schemas/extraction.schema.json'
+              parcel_geometries:
+                type: array
+                items:
+                  $ref: '../schemas/parcel_geometry.schema.json'

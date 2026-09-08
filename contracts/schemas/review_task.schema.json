@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://land-record-system/schemas/review_task.schema.json",
+  "title": "ReviewTask",
+  "description": "TODO: FR-REV-01-16. Suchit writes/owns; Shruthi supplies `reason` when rule-triggered; Tharun supplies dominant-feature text when confidence-triggered. Contract note: `source_stream` must never appear in any API response the officer's client can read — Suchit's API layer enforces this at serialization (FR-REV-11).",
+  "type": "object",
+  "required": ["id", "extraction_id", "reason", "source_stream", "opened_at"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "format": "uuid" },
+    "extraction_id": { "type": "string", "format": "uuid" },
+    "reason": { "type": "string", "description": "Shruthi: failing rule name + values, OR Tharun: dominant calibrator features (FR-REV-03/15)" },
+    "source_stream": { "type": "string", "enum": ["routed", "audit"], "description": "Tharun decides which; Suchit must render both identically (FR-REV-11); never serialized to the client." },
+    "assignee": { "type": ["string", "null"], "description": "user_id" },
+    "opened_at": { "type": "string", "format": "date-time" },
+    "closed_at": { "type": ["string", "null"], "format": "date-time" },
+    "cluster_id": { "type": ["string", "null"], "format": "uuid", "description": "FR-REV-14" },
+    "cluster_size": { "type": ["integer", "null"] },
+    "hour_into_session": { "type": ["integer", "null"], "description": "FR-REV-16" }
+  }
+}

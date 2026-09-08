@@ -1,0 +1,22 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://land-record-system/schemas/model_version.schema.json",
+  "title": "ModelVersion",
+  "description": "TODO: FR-LRN-04, calibration entity in PRD §06. Owner: Tharun (services/modelwork). Read by Shree via GET /models/{module}/active for adapter_ref lookup.",
+  "type": "object",
+  "required": ["id", "module", "version", "trained_on", "eval_results", "calibration_results", "dataset_snapshot_hash", "mde_at_promotion"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "format": "uuid" },
+    "module": { "type": "string", "enum": ["printed_ocr", "hwr", "calibrator", "novelty_detector", "triage_classifier"] },
+    "version": { "type": "string" },
+    "trained_on": { "type": "string", "description": "dataset_snapshot_hash" },
+    "eval_results": { "type": "object" },
+    "calibration_results": { "type": "object" },
+    "promoted_at": { "type": ["string", "null"], "format": "date-time" },
+    "calibrator_ref": { "type": ["string", "null"], "format": "uuid" },
+    "adapter_ref": { "type": ["string", "null"], "format": "uuid", "description": "FR-OCR-08 — per-writer adapter, consumed by Shree" },
+    "dataset_snapshot_hash": { "type": "string" },
+    "mde_at_promotion": { "type": "number", "description": "minimum detectable effect, PRD §09" }
+  }
+}

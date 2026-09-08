@@ -1,0 +1,10 @@
+[project]
+name = "contracts-generated"
+version = "0.1.0"
+description = "Generated pydantic models from contracts/schemas — do not hand-edit."
+requires-python = ">=3.11"
+dependencies = ["pydantic>=2.0"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"

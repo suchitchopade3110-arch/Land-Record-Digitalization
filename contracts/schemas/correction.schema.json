@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://land-record-system/schemas/correction.schema.json",
+  "title": "Correction",
+  "description": "TODO: FR-LRN-01/07/09/11/12. Suchit writes on officer submit; Tharun reads for training. Owner: Suchit (services/backend), consumed by services/modelwork.",
+  "type": "object",
+  "required": ["id", "extraction_id", "crop_uri", "predicted", "corrected", "edit_distance", "actor", "model_version", "config_version", "stream", "source_page_digest"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "format": "uuid" },
+    "extraction_id": { "type": "string", "format": "uuid" },
+    "crop_uri": { "type": "string" },
+    "predicted": { "type": "string" },
+    "corrected": { "type": "string" },
+    "edit_distance": { "type": "integer" },
+    "actor": { "type": "string", "description": "user_id" },
+    "model_version": { "type": "string" },
+    "config_version": { "type": "string" },
+    "stream": { "type": "string", "enum": ["routed", "audit", "downstream", "legacy_digital"] },
+    "source_page_digest": { "type": "string", "description": "sha256 — FR-LRN-11 leakage guard key" },
+    "reliability_weight": { "type": ["number", "null"], "description": "populated for legacy_digital stream, FR-LRN-12" }
+  }
+}

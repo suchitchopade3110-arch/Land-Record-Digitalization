@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://land-record-system/schemas/config_version.schema.json",
+  "title": "ConfigVersion",
+  "description": "TODO: FR-CFG-01-03. Owner: Suchit (services/backend). Read by Shree (unit tables, gazetteer closed sets), Shruthi (validator tolerances), Tharun (error policy, audit sample rates, cold-start thresholds) via GET /config/{scope}/{key}.",
+  "type": "object",
+  "required": ["id", "scope", "key", "value", "effective_from", "author", "approver"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "format": "uuid" },
+    "scope": { "type": "string", "enum": ["district", "state", "global"] },
+    "key": { "type": "string", "description": "e.g. 'unit_table.sitapur', 'validator_tolerance.geospatial'" },
+    "value": { "type": "object" },
+    "effective_from": { "type": "string", "format": "date-time" },
+    "author": { "type": "string", "description": "user_id" },
+    "approver": { "type": "string", "description": "user_id — must differ from author, FR-CFG-03" },
+    "superseded_by": { "type": ["string", "null"], "format": "uuid" }
+  }
+}

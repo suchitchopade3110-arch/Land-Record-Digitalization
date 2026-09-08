@@ -1,0 +1,34 @@
+# infra/CODEOWNERS
+#
+# Schema changes to any entity in contracts/schemas require sign-off from
+# every team that reads or writes it (API-Contracts-and-Interfaces.md §7
+# rule 4) — enforced mechanically here, not by memory.
+#
+# NOTE: replace the @suchit/@shree/@shruthi/@tharun placeholders with real
+# GitHub usernames before this file is relied on for review routing.
+
+contracts/schemas/page.schema.json                @suchit @tharun
+contracts/schemas/extraction.schema.json          @suchit @shree @tharun
+contracts/schemas/parcel_geometry.schema.json     @shree @shruthi
+contracts/schemas/validation_result.schema.json   @suchit @shree @shruthi @tharun
+contracts/schemas/record_assembly.schema.json     @shree
+contracts/schemas/review_task.schema.json         @suchit @shruthi @tharun
+contracts/schemas/audit_sample.schema.json        @suchit @tharun
+contracts/schemas/correction.schema.json          @suchit @tharun
+contracts/schemas/conflict.schema.json            @suchit @shruthi
+contracts/schemas/config_version.schema.json      @suchit @shree @shruthi @tharun
+contracts/schemas/model_version.schema.json       @tharun @shree
+contracts/schemas/work_envelope.schema.json       @suchit @shree @shruthi @tharun
+
+contracts/openapi/config-service.suchit.yaml         @suchit
+contracts/openapi/model-registry.tharun.yaml         @tharun
+contracts/openapi/closed-sets.suchit-shruthi.yaml    @suchit @shruthi
+
+services/backend/       @suchit
+services/extraction/    @shree
+services/validation/    @shruthi
+services/modelwork/     @tharun
+
+libs/observability/     @suchit @shree @shruthi @tharun
+gateway/                @suchit
+infra/                  @suchit

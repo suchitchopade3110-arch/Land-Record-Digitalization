@@ -1,0 +1,34 @@
+# TODO: FR-LRN-01/07/09/11/12. Producer: Suchit (review workbench emits Correction on officer
+# submit). Consumer: Tharun (learning loop — 4 streams: routed, audit, downstream,
+# legacy_digital, kept separate and reweighted, never pooled blind). Leakage guard: training
+# refuses to run if any source_page_digest intersects the frozen regression suite's exclusion
+# list (FR-LRN-11). See Architecture §21.
+asyncapi: 2.6.0
+info:
+  title: Learning Loop Queue
+  version: "0.1.0"
+channels:
+  LEARNING_LOOP_QUEUE:
+    subscribe:
+      summary: Consumed by Tharun's learning loop (stream tagging, leakage guard, stream-reweighted fine-tuning, promotion gate).
+      message:
+        $ref: '#/components/messages/LearningLoopEnvelope'
+    publish:
+      summary: Published by Suchit's review workbench on officer submit, and by the publication layer on downstream defect resolution.
+      message:
+        $ref: '#/components/messages/LearningLoopEnvelope'
+components:
+  messages:
+    LearningLoopEnvelope:
+      name: LearningLoopEnvelope
+      payload:
+        type: object
+        required: [message_id, trace_id, emitted_at, producer, work_envelope, payload]
+        properties:
+          message_id: { type: string, format: uuid }
+          trace_id: { type: string }
+          emitted_at: { type: string, format: date-time }
+          producer: { type: string, enum: [review, publication] }
+          work_envelope: { type: object, $ref: '../schemas/work_envelope.schema.json' }
+          payload:
+            $ref: '../schemas/correction.schema.json'

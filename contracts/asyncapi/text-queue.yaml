@@ -1,0 +1,35 @@
+# TODO: FR-EXT-04. Producer: Shree (text lane / OCR+HWR). Consumer: Shree (assembly is still
+# Shree's module). Payload: Extraction[] for a page. See API-Contracts §5, Architecture §10.
+asyncapi: 2.6.0
+info:
+  title: Text Queue
+  version: "0.1.0"
+channels:
+  TEXT_QUEUE:
+    subscribe:
+      summary: Consumed internally by Shree's assembly step.
+      message:
+        $ref: '#/components/messages/TextLaneEnvelope'
+    publish:
+      summary: Published by Suchit's triage router (fully classified Page + pinned work envelope) and re-published by Shree's OCR/HWR pipeline with Extraction[] on the way to assembly.
+      message:
+        $ref: '#/components/messages/TextLaneEnvelope'
+components:
+  messages:
+    TextLaneEnvelope:
+      name: TextLaneEnvelope
+      payload:
+        type: object
+        required: [message_id, trace_id, emitted_at, producer, work_envelope, payload]
+        properties:
+          message_id: { type: string, format: uuid }
+          trace_id: { type: string }
+          emitted_at: { type: string, format: date-time }
+          producer: { type: string, enum: [triage, text-lane] }
+          work_envelope:
+            type: object
+            $ref: '../schemas/work_envelope.schema.json'
+          payload:
+            type: array
+            items:
+              $ref: '../schemas/extraction.schema.json'

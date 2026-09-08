@@ -1,0 +1,17 @@
+[project]
+name = "backend"
+version = "0.1.0"
+description = "Suchit — API layer, Storage, Queue infra, M1/M2-routing/M9/M10/M12-M15."
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.110",
+  "uvicorn[standard]>=0.29",
+  "pydantic>=2.0",
+  "sqlalchemy>=2.0",
+  "alembic>=1.13",
+  "observability",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
