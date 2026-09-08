@@ -25,6 +25,16 @@ jobs:
       - name: Install test dependencies
         run: pip install pytest jsonschema pyyaml
 
+      - name: Install shared libs + all services
+        # Per-service contract tests import their own service package (and
+        # observability) — install everything up front rather than
+        # per-service, since this job (unlike ci.yml) isn't matrixed.
+        run: |
+          pip install -e libs/observability
+          for svc in backend extraction validation modelwork; do
+            pip install -e "services/$svc"
+          done
+
       - name: Run root contract tests
         run: pytest tests/contract -v
 

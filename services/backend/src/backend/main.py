@@ -5,7 +5,14 @@ an undocumented path.
 """
 from fastapi import FastAPI
 
-from backend.api import closed_sets, config_service, conflicts, dashboard, documents, review_tasks
+from backend.api import (
+    closed_sets,
+    config_service,
+    conflicts,
+    dashboard,
+    documents,
+    review_tasks,
+)
 
 app = FastAPI(title="backend", description="Suchit — API, Storage, Queue, M1/M2-routing/M9-M10-M12-M15")
 
