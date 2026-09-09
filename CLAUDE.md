@@ -87,6 +87,35 @@ contract disagree, the contract wins.
    `ReviewTaskPublicView` structurally omits the field; a contract test
    diffs a routed and an audit task response byte-for-byte. (FR-REV-11)
 
+## Dashboard: one source of truth, one named exception (M14, FR-ANL-01/07/08)
+
+Every dashboard figure is a query over `audit_entry` (materialized views over
+it are fine; a separately incremented counter or an in-memory tally is not —
+it can drift from the log it's supposed to summarize, silently).
+
+`FR-ANL-08` (cost per page) is the one place this rule cannot be met as
+written: the PRD sources the inference-cost component from observability
+data, not from the audit log, because inference cost is not something the
+audit log records. This is a single, named exception, not a precedent:
+
+- Only the inference-cost component of `FR-ANL-08` may be served from a
+  source other than `audit_entry`. Every other figure on the dashboard,
+  `FR-ANL-08`'s own officer-cost component included, still comes from the
+  audit log.
+- That component is served from a separate, explicitly named path (its own
+  query/endpoint, not folded into the general dashboard query surface), and
+  the response it produces must declare its source (e.g. a `source:
+  "observability"` field or equivalent) so a caller can never mistake it
+  for an audit-log-derived figure.
+- Do not generalize this into a second general-purpose rollup table, and do
+  not let a second figure quietly acquire the same treatment — if another
+  figure seems to need a non-audit-log source, that is a new instance of
+  "stop and ask," not an extension of this exception.
+
+A reconciliation test (T5.d in the Phase 5 build prompt) checks every other
+figure against a direct `audit_entry` query and asserts this exception is
+the only one, and that it is labelled as such in the response.
+
 ## Stop and ask, do not decide
 
 - A task that appears to need a `contracts/` edit.
