@@ -13,5 +13,11 @@ def test_expected_routes_are_mounted():
     # than APIRoute objects directly, so resolve via the generated OpenAPI
     # schema (the same source FastAPI's own /docs and /openapi.json use).
     paths = set(app.openapi()["paths"].keys())
-    for expected in ("/documents", "/config/{scope}/{key}", "/closed-sets/{type}", "/review-tasks", "/conflicts", "/dashboard/metrics", "/healthz"):
+    for expected in (
+        "/documents", "/config/{scope}/{key}", "/closed-sets/{type}", "/review-tasks",
+        "/review-tasks/next", "/review-tasks/{task_id}/crop", "/review-tasks/{task_id}/submit",
+        "/review-tasks/{task_id}/skip", "/conflicts", "/conflicts/{conflict_id}",
+        "/conflicts/{conflict_id}/assign", "/conflicts/{conflict_id}/transition",
+        "/dashboard/metrics", "/healthz",
+    ):
         assert expected in paths, f"{expected} not mounted — check gateway/route_registry.yaml stays in sync"

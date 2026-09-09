@@ -462,6 +462,82 @@ class FixityCheck(Base):
     )
 
 
+class ReviewSession(Base):
+    """Phase 3 (P3-13, FR-REV-16). Backend-internal anchor for
+    `hour_into_session` — not a `contracts/schemas/*.json` entity, because
+    no other team's code reads or writes it (only `services/backend`'s own
+    review workbench computes `ReviewTask.hour_into_session` from it,
+    exactly as `INGESTION_QUEUE` in Phase 2 stayed out of
+    `contracts/asyncapi/` for the identical reason — see PHASE3.md). A new
+    session opens the first time an officer claims a task after
+    `REVIEW_SESSION_GAP` of inactivity; `last_activity_at` advances on
+    every claim so the gap is measured from real idle time, not wall clock
+    since login."""
+
+    __tablename__ = "review_session"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    actor: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    last_activity_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class PendingCorrection(Base):
+    """P3-07/FR-REV-12 maker–checker staging table. A high-edit-distance
+    correction on a maker–checker field class lands here, never in
+    `Correction`, until a second, distinct actor confirms it — the
+    structural fix for "pending edits leaking into the learning loop"
+    named in the build prompt: Tharun's training-store reader only ever
+    queries `correction` (the frozen contract table), so a row that only
+    exists here is absent from that read view by construction, not by
+    convention. `Correction`'s own schema is frozen
+    (`contracts/schemas/correction.schema.json`) and has no `state`/
+    confirming-actor field, which is exactly why this couldn't be a status
+    column on that table instead — see PHASE3.md."""
+
+    __tablename__ = "pending_correction"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    extraction_id: Mapped[str] = mapped_column(String, ForeignKey("extraction.id"), nullable=False, index=True)
+    crop_uri: Mapped[str] = mapped_column(String, nullable=False)
+    predicted: Mapped[str | None] = mapped_column(String)
+    corrected: Mapped[str | None] = mapped_column(String)
+    edit_distance: Mapped[int] = mapped_column(Integer, nullable=False)
+    field_class: Mapped[str] = mapped_column(String, nullable=False)
+    first_actor: Mapped[str] = mapped_column(String, nullable=False)
+    model_version: Mapped[str | None] = mapped_column(String)
+    config_version: Mapped[str | None] = mapped_column(String)
+    stream: Mapped[str] = mapped_column(String, nullable=False)
+    source_page_digest: Mapped[str] = mapped_column(String, nullable=False)
+    opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    state: Mapped[str] = mapped_column(String, nullable=False, server_default="pending")
+    confirmed_by: Mapped[str | None] = mapped_column(String)
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    resulting_correction_id: Mapped[str | None] = mapped_column(String, ForeignKey("correction.id"))
+
+    __table_args__ = (
+        CheckConstraint("state IN ('pending','confirmed')", name="ck_pending_correction_state_enum"),
+    )
+
+
+class OperationalAlert(Base):
+    """P3-02/FR-CNF-14. `outside_calibrated_regime` never creates a
+    per-field `ReviewTask` — a *cluster* of novel pages raises exactly one
+    of these, deduplicated on `cluster_key` within
+    `NOVELTY_CLUSTER_ALERT_DEDUP_WINDOW` (`backend.domain.review_policy`).
+    `cluster_key` is supplied by the caller (Tharun's novelty output names
+    the cluster; backend does not cluster, per the ground rules) — see
+    `backend.domain.decision._outside_calibrated_regime` for the
+    fixture-backed fallback used until that field exists on a contract
+    Tharun's side actually emits (PHASE3.md)."""
+
+    __tablename__ = "operational_alert"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    kind: Mapped[str] = mapped_column(String, nullable=False)
+    cluster_key: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    extraction_ids: Mapped[list[str]] = mapped_column(ARRAY(String), nullable=False, server_default="{}")
+    opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class LegacyRecordRef(Base):
     """FR-VAL-08. Stays empty until PRD §11 Q3/Q9 are answered
     (docs/open-questions.md) — the table exists so the reweighting this

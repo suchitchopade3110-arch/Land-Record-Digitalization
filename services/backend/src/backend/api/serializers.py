@@ -55,6 +55,39 @@ def strip_review_task_internals(review_task: Any) -> ReviewTaskPublicView:
     )
 
 
+class ConflictPublicView(BaseModel):
+    """P3-10 — "the entry alone must let a supervisor understand the
+    dispute without opening the pipeline": every field a supervisor needs
+    (records, rule, evidence, state, assignee, ageing) is here; nothing
+    about `Conflict` needs withholding the way `ReviewTask.source_stream`
+    does, so this is a plain projection, not a masking boundary."""
+
+    id: str
+    records: list[str]
+    rule: str
+    evidence: dict
+    origin: str
+    state: str
+    assignee: str | None
+    opened_at: str
+
+
+def conflict_to_public_view(conflict: Any) -> ConflictPublicView:
+    def _iso(value):
+        return value.isoformat() if hasattr(value, "isoformat") else value
+
+    return ConflictPublicView(
+        id=conflict.id,
+        records=conflict.records,
+        rule=conflict.rule,
+        evidence=conflict.evidence,
+        origin=conflict.origin,
+        state=conflict.state,
+        assignee=conflict.assignee,
+        opened_at=_iso(conflict.opened_at),
+    )
+
+
 class MaskedExtractionView(BaseModel):
     id: str
     page_id: str
