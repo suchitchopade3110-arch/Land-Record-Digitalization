@@ -1,4 +1,4 @@
-.PHONY: up down install migrate migrate-libtest test-db seed lint test test-unit test-contract test-invariant test-property test-e2e verify
+.PHONY: up down install migrate migrate-libtest test-db seed lint test test-unit test-contract test-invariant test-property test-e2e verify verify-chain
 
 # Matches infra/docker-compose.yml's postgres service as seen from the
 # host (postgres/dev@localhost:5432/landrecords). Override for a
@@ -48,6 +48,9 @@ test-db: ## (Re)create landrecords_test + landrecords_libtest and migrate the fo
 
 seed: ## Load a small fake batch/document/page so the API has something to show.
 	DATABASE_URL="$(DATABASE_URL)" python scripts/seed.py
+
+verify-chain: ## P4-06 — standalone chain verification. Pass ARGS="--anchored-root <root>" (or --anchor-store-key <key>).
+	DATABASE_URL="$(DATABASE_URL)" python -m backend.cli.verify_chain $(ARGS)
 
 # ---- quality gates ----
 

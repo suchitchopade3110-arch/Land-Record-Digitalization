@@ -30,6 +30,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -205,14 +206,34 @@ class ParcelGeometry(Base):
 
 
 class Record(Base):
+    """P4-01/FR-PUB-01 — publication writes a new VERSION, never an
+    update. `id` is this version's own row identity (what `ValidationResult
+    .record_id`/`MutationEvent.source_record_id`/`LegacyRecordRef.record_id`
+    reference — a specific version, per those tables' pre-existing FK
+    meaning from Phase 1); `record_group_id` is the stable identity across
+    versions of the same logical record — a publish always INSERTs a new
+    row with the same `record_group_id` and `version = previous_max + 1`,
+    never UPDATEs an existing row. Enforced two ways: `uq_record_group_version`
+    (a given (group, version) pair can only exist once — no double-publish
+    landing on the same version number) and a DB trigger rejecting any
+    `UPDATE` on this table outright (migration 0005), the same pattern
+    `work_envelope`'s immutability trigger uses (invariant 3). See
+    PHASE4.md's "P4-01" section for why `record_group_id` was added rather
+    than reusing `id` as the stable identity."""
+
     __tablename__ = "record"
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    record_group_id: Mapped[str] = mapped_column(String, nullable=False, default=_uuid, index=True)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)  # FR-PUB-01, never overwritten
     parcel_ref: Mapped[str | None] = mapped_column(String)
     ulpin: Mapped[str | None] = mapped_column(String)
     lgd_codes: Mapped[dict | None] = mapped_column(JSONB)
     status: Mapped[str | None] = mapped_column(String)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        UniqueConstraint("record_group_id", "version", name="uq_record_group_version"),
+    )
 
 
 class OwnerShare(Base):
@@ -362,6 +383,12 @@ class Correction(Base):
     stream: Mapped[str] = mapped_column(String, nullable=False)  # FR-LRN-07
     source_page_digest: Mapped[str] = mapped_column(String, nullable=False, index=True)  # FR-LRN-11
     reliability_weight: Mapped[float | None] = mapped_column(Float)  # FR-LRN-12, legacy_digital stream only
+    # DB-only column, not part of contracts/schemas/correction.schema.json
+    # (that schema is `additionalProperties: false` and frozen) — same
+    # posture as Extraction's DB columns being a superset of its own
+    # contract shape. P4-02: this is what lets `provenance.edit_history`
+    # order a field's corrections chronologically.
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     __table_args__ = (
         CheckConstraint(
@@ -536,6 +563,46 @@ class OperationalAlert(Base):
     cluster_key: Mapped[str] = mapped_column(String, nullable=False, index=True)
     extraction_ids: Mapped[list[str]] = mapped_column(ARRAY(String), nullable=False, server_default="{}")
     opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class FieldProvenance(Base):
+    """P4-02/FR-PUB-02 — the provenance data `Extraction` itself does not
+    already carry. Deliberately NOT a duplicate of `Extraction.bbox` /
+    `.engine` / `.model_version` / `.config_version` / `.raw_value` /
+    `.token_confidence` — those already exist on the frozen-shape
+    `Extraction` row (contracts/schemas/extraction.schema.json) and this
+    table joins to it rather than re-storing them (one source of truth,
+    no drift). What this table adds: `document_id` (a convenience
+    denormalization — `Extraction.page_id -> Page.document_id` is a join
+    away, but provenance navigation, P4's T4.e, wants it in one row) and
+    the two transforms P4-02 specifically calls out: "store page-split and
+    deskew transform alongside bbox so coordinates still resolve after
+    preprocessing changes" — `Extraction.bbox` is pixel coordinates on the
+    *split, deskewed* page image; without these transforms recorded, a
+    future reprocessing run that changes deskew parameters would silently
+    invalidate every already-published bbox with no way to tell.
+
+    One row per `Extraction` (1:1, `extraction_id` unique) — provenance
+    facts don't have their own version history the way field *values* do;
+    a corrected value creates a new `Extraction`/`Correction`, which gets
+    its own `FieldProvenance` row from whatever produced it.
+
+    "Full edit history with actors" (P4-02's other requirement) is NOT a
+    new table here — it already exists as `Correction` rows for this
+    `extraction_id` (actor, predicted/corrected, edit_distance,
+    `created_at`), reused rather than duplicated; see
+    `backend.domain.provenance.resolve_provenance`.
+    """
+
+    __tablename__ = "field_provenance"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    extraction_id: Mapped[str] = mapped_column(
+        String, ForeignKey("extraction.id"), nullable=False, unique=True, index=True
+    )
+    document_id: Mapped[str] = mapped_column(String, ForeignKey("source_document.id"), nullable=False, index=True)
+    page_split_transform: Mapped[dict | None] = mapped_column(JSONB)  # backend.domain.page_split's own output
+    deskew_transform: Mapped[dict | None] = mapped_column(JSONB)  # backend.domain.preprocessing's own output
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
 class LegacyRecordRef(Base):
