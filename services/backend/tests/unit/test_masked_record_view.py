@@ -5,7 +5,6 @@ functions of a dict + a role once given a real `ObjectStorePort`, and
 and "the crop is masked by refusing to issue the signed URL, not by
 blurring after the fact" (P4-10) directly.
 """
-import os
 import tempfile
 
 import pytest
