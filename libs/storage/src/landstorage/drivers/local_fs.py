@@ -5,8 +5,10 @@ S3-compatible storage does the equivalent job for the `s3` driver)."""
 from __future__ import annotations
 
 import os
+import shutil
 import tempfile
 from pathlib import Path
+from typing import IO, BinaryIO
 
 from landstorage.port import (
     ObjectAlreadyExistsWithDifferentContent,
@@ -74,3 +76,35 @@ class LocalFsObjectStore(ObjectStorePort):
         data = self.get(key)
         expected_digest = key.rsplit("/", 1)[-1]
         return digest_of(data) == expected_digest
+
+    def open_stream(self, key: str) -> BinaryIO:
+        path = self._path(key)
+        if not path.exists():
+            raise KeyError(key)
+        return path.open("rb")
+
+    def _write_new_object(self, key: str, fileobj: IO[bytes]) -> None:
+        path = self._path(key)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # Same atomic write-then-rename discipline as put(): stream into a
+        # temp file in the same directory (never loading `fileobj` fully
+        # into memory), then rename — a concurrent reader never sees a
+        # partial write and a crash mid-copy never leaves a corrupt object
+        # at `key`.
+        fd, tmp_name = tempfile.mkstemp(dir=path.parent)
+        try:
+            with os.fdopen(fd, "wb") as dest:
+                shutil.copyfileobj(fileobj, dest)
+            if path.exists():
+                # Lost a race with another writer of the same content —
+                # harmless (ADR-004): the key IS the digest, so whatever
+                # landed there already is byte-identical to what we were
+                # about to write. Caller's exists() check already covers
+                # the "different content" case via _streamed_content_matches.
+                os.unlink(tmp_name)
+                return
+            os.replace(tmp_name, path)
+        except BaseException:
+            if os.path.exists(tmp_name):
+                os.unlink(tmp_name)
+            raise

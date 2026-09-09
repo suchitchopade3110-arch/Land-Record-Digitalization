@@ -6,6 +6,7 @@ requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.110",
   "uvicorn[standard]>=0.29",
+  "python-multipart>=0.0.9", # FR-ING-01 — multipart file upload on POST /documents
   "pydantic>=2.0",
   "sqlalchemy>=2.0",
   "alembic>=1.13",
@@ -17,6 +18,8 @@ dependencies = [
   "landenvelope",
   "landmasking",
   "landaudit",
+  "pypdf>=4.0",   # FR-ING-03 — PDF page-tree splitting (structural, not OCR)
+  "pillow>=10.0", # FR-ING-03/FR-TRI-06 — multi-frame TIFF splitting + off-the-shelf preprocessing ops
 ]
 
 [build-system]

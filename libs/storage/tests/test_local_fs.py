@@ -1,5 +1,7 @@
 """Real filesystem test — proves FR-ING-02 immutability and FR-ING-04
 dedupe are storage properties, not application-level checks."""
+import io
+import os
 import tempfile
 from pathlib import Path
 
@@ -81,3 +83,69 @@ def test_put_refuses_to_silently_accept_a_digest_collision_style_corruption(stor
 
     with pytest.raises(ObjectAlreadyExistsWithDifferentContent):
         store.put(data)
+
+
+# ---- put_stream/open_stream (FR-ING-02 streaming custody) ----
+
+
+def test_put_stream_computes_the_same_digest_as_put(store):
+    data = b"a 500-page PDF's worth of bytes, in spirit" * 1000
+    streamed = store.put_stream(io.BytesIO(data))
+
+    assert streamed.digest == digest_of(data)
+    assert streamed.key == key_for(streamed.digest)
+    assert streamed.created is True
+    assert store.get(streamed.key) == data
+
+
+def test_put_stream_dedupes_like_put_FR_ING_04(store):
+    data = b"streamed twice"
+    first = store.put_stream(io.BytesIO(data))
+    second = store.put_stream(io.BytesIO(data))
+
+    assert first.key == second.key
+    assert second.created is False
+
+
+def test_open_stream_reads_back_exactly_what_was_put_via_put_stream(store):
+    data = b"\x00\x01binary-safe-streamed-content\xff" * 500
+    result = store.put_stream(io.BytesIO(data))
+
+    with store.open_stream(result.key) as f:
+        assert f.read() == data
+
+
+def test_open_stream_of_unknown_key_raises_keyerror(store):
+    with pytest.raises(KeyError):
+        store.open_stream("sha256/ab/cd/doesnotexist")
+
+
+def test_put_stream_never_buffers_the_whole_object_in_process_memory(store):
+    """Not a memory-profiler assertion (too environment-dependent to be a
+    reliable CI check) — instead proves the mechanism that gives the
+    memory property: `hash_stream_to_spooled_tempfile`'s spool spills to
+    disk once past its in-memory threshold, so a large put_stream() is
+    backed by a real file, not a giant `bytes` object, at the point the
+    driver writes it."""
+    from landstorage.port import hash_stream_to_spooled_tempfile
+
+    data = os.urandom(1024)
+    digest, spooled = hash_stream_to_spooled_tempfile(io.BytesIO(data), max_size_in_memory=16)
+    try:
+        assert digest == digest_of(data)
+        # SpooledTemporaryFile exposes the real file once it has spilled —
+        # `_file` is a plain file object with a `.name` (a real path) past
+        # the in-memory threshold, `io.BytesIO`-like below it.
+        assert hasattr(spooled._file, "name")
+    finally:
+        spooled.close()
+
+
+def test_put_stream_refuses_a_digest_collision_style_corruption_without_loading_either_file_fully(store):
+    data = b"correct streamed content"
+    result = store.put_stream(io.BytesIO(data))
+    on_disk = Path(store._path(result.key))
+    on_disk.write_bytes(b"WRONG bytes now sitting at this key")
+
+    with pytest.raises(ObjectAlreadyExistsWithDifferentContent):
+        store.put_stream(io.BytesIO(data))

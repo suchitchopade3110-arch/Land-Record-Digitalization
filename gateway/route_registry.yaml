@@ -38,7 +38,7 @@ routes:
     owner: suchit
     service: backend
     kind: rest
-    note: "ingest entrypoint (M1) — client uploads land here, gets a job id back, never blocks"
+    note: "ingest entrypoint (M1) — client uploads land here, gets a job id back, never blocks. Live as of Phase 2 (P2-01/02/04/05); see PHASE2.md."
 
   - path: /review-tasks
     method: GET

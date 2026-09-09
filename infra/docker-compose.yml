@@ -36,6 +36,20 @@ services:
       DATABASE_URL: postgresql://postgres:dev@postgres:5432/landrecords
       OBJECT_STORE_URL: http://minio:9000
       QUEUE_URL: redis://redis:6379
+      # FR-ING-07 (P2-06): the secondary object-store namespace is
+      # deliberately never derived from OBJECT_STORE_* above — a
+      # genuinely separate root, verified distinct at startup
+      # (landstorage.distinct.assert_distinct_stores). A real deployment
+      # points this at a second bucket under separate credentials; local
+      # dev uses a second local_fs root, which is still enough to prove
+      # "a single compromised key can't rewrite both copies" doesn't hold
+      # for the *same* filesystem-permission boundary, and is honest about
+      # that limit rather than pretending two directories are two
+      # credential sets.
+      SECONDARY_OBJECT_STORE_ROOT: /data/secondary-objects
+      DROP_FOLDER_PATH: /data/drop-folder  # P2-01 — the watched-folder ingest entrypoint
+    volumes:
+      - backend_data:/data
     depends_on: [postgres, minio, redis]
     ports: ["8001:8000"]
 
@@ -77,3 +91,4 @@ services:
 volumes:
   postgres_data:
   minio_data:
+  backend_data:

@@ -35,6 +35,18 @@ text/map after triage, and validation/entity-resolution after normalize.
 | `review-queue.yaml` / `conflict-queue.yaml` / `publication-queue.yaml` | Decision's three (of five) queue-backed outcomes — auto-accept and audit-sample both resolve to the publish or review path without a distinct queue of their own; see `services/backend/src/backend/workers/decision_engine.py` for the five-way routing logic that decides which of these three (or "outside calibrated regime," which does not queue anywhere — it terminates at `RescanTask`/an operational alert) a given `Extraction` lands in |
 | `learning-loop-queue.yaml` | Review → Learning Loop |
 
+## `INGESTION_QUEUE` — backend-internal, not a `contracts/asyncapi/` entry
+
+Added in Phase 2, this queue sits *before* the "Ingest → Triage" hop
+above: `POST /documents` does custody (hash + store) synchronously and
+hands off the (potentially slow, e.g. 500-page) page-split work to
+`backend.workers.ingestion_consumer` over `INGESTION_QUEUE`. It carries no
+`Page`-shaped payload (there is no `Page` yet — only a document id and a
+storage key) and no service outside `services/backend` ever reads it, so
+it isn't part of the frozen cross-team contract set; `ingestion_consumer`
+is what publishes the real, `page.schema.json`-shaped `TRIAGE_QUEUE`
+message once pages actually exist. See `PHASE2.md`.
+
 ## Broker
 
 Redis Streams locally and in CI, NATS JetStream in the pilot/prod target —
