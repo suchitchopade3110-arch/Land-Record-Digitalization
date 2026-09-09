@@ -438,6 +438,46 @@ class ConfigVersion(Base):
     )
 
 
+class ClosedSetEntry(Base):
+    """P5-05, contract §4.3, FR-VAL-09 — one code in a closed set served by
+    `GET /closed-sets/{type}`. Not a `contracts/schemas/*.json` entity
+    (same reasoning as `WriterCluster`/`VolumeIndex` above): this is
+    backend-internal storage behind a synchronous read API, not one of
+    the pipeline's frozen entities.
+
+    `provenance` is the corpus-partition rule's ground truth — the column
+    `backend.domain.closed_sets` filters on, and the only column the
+    endpoint's response `source` field is ever derived from. `source` is
+    a separate, self-reported/free-text label that a seeding or ETL
+    process may attach for its own bookkeeping; the endpoint never trusts
+    it, and never returns it — a row can claim `source="schema"` while
+    `provenance="lrms"` and the corpus-partition rule still holds, because
+    nothing ever reads `source` to decide what's servable (T5.c).
+
+    `config_version` names the `ConfigVersion` "vintage" this entry
+    belongs to — `backend.domain.closed_sets.resolve_corpus_config_version`
+    resolves which vintage is current for a (type, district) through
+    `libs/config_client` (P5-04), then this column scopes which rows
+    belong to that vintage. Rows are insert-only; a corpus update is a new
+    `ConfigVersion` id plus a fresh batch of entries, never an UPDATE of
+    an existing entry (same "new version, never overwrite" shape as every
+    other config-is-data table in this file).
+    """
+
+    __tablename__ = "closed_set_entry"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    type: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    district: Mapped[str | None] = mapped_column(String, index=True)  # None = applies to every district
+    code: Mapped[str] = mapped_column(String, nullable=False)
+    source: Mapped[str] = mapped_column(String, nullable=False)  # self-reported — never trusted, see docstring
+    provenance: Mapped[str] = mapped_column(String, nullable=False)  # ground truth — schema|lgd|lrms
+    config_version: Mapped[str] = mapped_column(String, ForeignKey("config_version.id"), nullable=False, index=True)
+
+    __table_args__ = (
+        CheckConstraint("provenance IN ('schema','lgd','lrms')", name="ck_closed_set_entry_provenance_enum"),
+    )
+
+
 class WriterCluster(Base):
     __tablename__ = "writer_cluster"
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)

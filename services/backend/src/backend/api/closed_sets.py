@@ -1,15 +1,38 @@
-"""GET /closed-sets/{type} — TODO: FR-VAL-09, FR-OCR-07. Joint owner w/ Shruthi.
+"""GET /closed-sets/{type} — FR-VAL-09, FR-OCR-07. Joint owner w/ Shruthi.
 contracts/openapi/closed-sets.suchit-shruthi.yaml
 
 Hard rule: NEVER expose LRMS-derived sets, only LGD/schema sets (blocked by
 PRD §11 Q3/Q9 until resolved). See API-Contracts §4.3.
+
+P5-05: the corpus-partition rule is enforced in
+`backend.domain.closed_sets`, keyed off each entry's `provenance` column,
+never its self-reported `source` — see that module's docstring and T5.c.
 """
-from fastapi import APIRouter, HTTPException
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+
+from backend.config import config_client
+from backend.domain.closed_sets import ClosedSetTypeNotFound, get_closed_set
+from backend.models.base import session_factory
 
 router = APIRouter(tags=["closed-sets"])
 
 
+def get_session():
+    factory = session_factory()
+    with factory() as session:
+        yield session
+
+
 @router.get("/closed-sets/{type}")
-def get_closed_set(type: str, district: str | None = None):
-    # TODO: FR-VAL-09 — schema/LGD-derived sets only. Never LRMS-derived.
-    raise HTTPException(status_code=501, detail="TODO: FR-VAL-09 not implemented")
+def get_closed_set_route(
+    type: str,
+    district: str | None = None,
+    session: Session = Depends(get_session),
+) -> dict:
+    try:
+        return get_closed_set(session, config_client, type, district)
+    except ClosedSetTypeNotFound:
+        raise HTTPException(status_code=404, detail=f"no closed set configured for type={type!r}")
