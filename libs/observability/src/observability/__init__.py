@@ -6,15 +6,15 @@ API-Contracts-and-Interfaces.md §1. Not a PRD-sourced requirement — agreed
 by the team so any subsystem can be debugged from a single log query.
 """
 
-from .tracing import trace_id_for, traced_consumer, get_logger
-from .envelope import emit, validate_envelope
 from .config_client import ConfigClient
+from .envelope import emit, validate_envelope
+from .tracing import get_logger, trace_id_for, traced_consumer
 
 __all__ = [
+    "ConfigClient",
+    "emit",
+    "get_logger",
     "trace_id_for",
     "traced_consumer",
-    "get_logger",
-    "emit",
     "validate_envelope",
-    "ConfigClient",
 ]

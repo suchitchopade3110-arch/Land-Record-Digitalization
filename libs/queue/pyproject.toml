@@ -1,0 +1,19 @@
+[project]
+name = "landqueue"
+version = "0.1.0"
+description = "ADR-003 — broker behind a port. Every service imports this, never a broker client directly."
+requires-python = ">=3.11"
+dependencies = [
+  "redis>=5.0",
+]
+
+[project.optional-dependencies]
+nats = ["nats-py>=2.7"]
+dev = ["pytest>=8.0"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

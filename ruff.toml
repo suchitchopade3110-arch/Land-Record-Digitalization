@@ -1,0 +1,15 @@
+# Repo-wide ruff config. Pin the ruff *version* in the Makefile's `install`
+# target and .github/workflows/ci.yml (both `ruff==0.16.6`) rather than
+# here — this file governs rule selection, not the interpreter running it.
+# The two drifting apart is exactly how a "make lint" that passed locally
+# reached CI red: an unpinned `pip install ruff` resolves whatever is
+# newest on the day it runs, and ruff's own default rule set has grown
+# between minor versions.
+
+[lint.flake8-bugbear]
+# FastAPI's dependency-injection pattern is `def handler(x: Session =
+# Depends(get_session))` — calling Depends()/Query()/Path()/Body() in a
+# parameter default is the framework's own documented, idiomatic usage,
+# not the mutable-default-argument bug B008 exists to catch. Every
+# services/*/api/*.py handler in this repo uses this pattern deliberately.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path", "fastapi.Body"]

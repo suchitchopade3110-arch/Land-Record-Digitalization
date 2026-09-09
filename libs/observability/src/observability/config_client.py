@@ -11,7 +11,8 @@ services/backend) once the gateway/route_registry.yaml route is implemented.
 """
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 
 class ConfigClient:

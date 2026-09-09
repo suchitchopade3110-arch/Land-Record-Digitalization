@@ -1,20 +1,53 @@
 name: contract-tests
 
-# Runs on every PR that touches contracts/ or a service's schema usage —
-# catches schema drift before it merges (Skeleton-Prompt.md §1/§6).
+# Runs on every PR that touches contracts/, libs/, migrations, or a
+# service's schema/domain usage — catches schema drift and the four hard
+# invariants breaking before they merge. This is CI's version of `make
+# verify` (see root Makefile and CLAUDE.md's invariant list).
 on:
   pull_request:
     paths:
       - "contracts/**"
+      - "libs/**"
+      - "infra/migrations/**"
       - "services/**/models/**"
-      - "services/**/tests/contract/**"
-      - "tests/contract/**"
+      - "services/**/domain/**"
+      - "services/**/tests/**"
+      - "tests/**"
   push:
     branches: [main]
 
 jobs:
   contract-tests:
     runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: dev
+          POSTGRES_DB: landrecords_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      TEST_DATABASE_URL: postgresql+psycopg://postgres:dev@localhost:5432/landrecords_test
+      LIB_TEST_DATABASE_URL: postgresql+psycopg://postgres:dev@localhost:5432/landrecords_libtest
+      QUEUE_URL: redis://localhost:6379/0
+
     steps:
       - uses: actions/checkout@v4
 
@@ -27,16 +60,33 @@ jobs:
 
       - name: Install shared libs + all services
         # Per-service contract tests import their own service package (and
-        # observability) — install everything up front rather than
+        # every shared lib) — install everything up front rather than
         # per-service, since this job (unlike ci.yml) isn't matrixed.
         run: |
-          pip install -e libs/observability
+          pip install -e libs/observability -e libs/queue -e libs/storage -e libs/outbox -e libs/envelope -e libs/masking -e libs/audit
           for svc in backend extraction validation modelwork; do
             pip install -e "services/$svc"
           done
 
+      - name: Create landrecords_libtest (landrecords_test already exists — POSTGRES_DB above)
+        run: PGPASSWORD=dev createdb -h localhost -U postgres landrecords_libtest
+
+      - name: Apply migrations to landrecords_test
+        run: |
+          cd infra/migrations
+          DATABASE_URL="$TEST_DATABASE_URL" python -m alembic upgrade head
+
       - name: Run root contract tests
         run: pytest tests/contract -v
+
+      - name: Run the four hard invariants (tests/invariant) — real failing-write DB tests
+        run: pytest tests/invariant -v
+
+      - name: Run masking property tests
+        run: pytest tests/property -v
+
+      - name: Run the fake end-to-end pipeline run (tests/e2e)
+        run: pytest tests/e2e -v
 
       - name: Run per-service contract tests
         run: |
@@ -48,3 +98,6 @@ jobs:
 
       - name: Run libs/observability tests
         run: pytest libs/observability/tests -v
+
+      - name: Run every other lib's own tests (isolated on landrecords_libtest)
+        run: pytest libs/queue/tests libs/storage/tests libs/masking/tests libs/envelope/tests libs/outbox/tests libs/audit/tests -v

@@ -1,0 +1,17 @@
+[project]
+name = "landstorage"
+version = "0.1.0"
+description = "ADR-004 — content-addressed object storage. key = sha256/{d[0:2]}/{d[2:4]}/{digest}."
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+s3 = ["boto3>=1.34"]
+dev = ["pytest>=8.0"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

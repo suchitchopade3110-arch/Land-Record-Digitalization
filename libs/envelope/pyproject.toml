@@ -1,0 +1,16 @@
+[project]
+name = "landenvelope"
+version = "0.1.0"
+description = "FR-TRI-09/FR-CFG-02 — the WorkEnvelope pin/read mechanism. Backend owns this; every stage after triage reads from it, never from a live registry lookup."
+requires-python = ">=3.11"
+dependencies = ["sqlalchemy>=2.0"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "psycopg[binary]>=3.1"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
