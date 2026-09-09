@@ -1,10 +1,14 @@
 """FR-VAL-09 — consumed_constraints non-empty forces verdict = not_applicable.
 
-TODO: this trigger is a placeholder — the validation_result table itself
-does not exist yet (that lands with services/backend's first real model).
-Wire this migration in immediately after that table is created; it is the
-one hard invariant the PRD calls out as a schema-level property, not a lint
-warning (API-Contracts-and-Interfaces.md §3.4).
+SUPERSEDED by 0002_core_schema.py: the invariant is enforced there as a
+Postgres CHECK constraint on `validation_result`
+(`ck_validation_result_consumed_constraints_forces_not_applicable`) rather
+than the BEFORE INSERT/UPDATE trigger this file sketches — a CHECK
+constraint is what CLAUDE.md's invariant list and the original brief both
+actually asked for, and it's simpler than a trigger function for the same
+guarantee. Left in place, still a no-op (upgrade()/downgrade() below are
+unchanged), as a historical record rather than rewritten — 0002 is the
+migration that actually creates `validation_result` and everything else.
 
 Revision ID: 0001
 Revises:

@@ -1,0 +1,16 @@
+[project]
+name = "landmasking"
+version = "0.1.0"
+description = "ADR-007/FR-SEC-02 — the single masking code path. Masks value, provenance raw_value, and crop_uri together, never independently."
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

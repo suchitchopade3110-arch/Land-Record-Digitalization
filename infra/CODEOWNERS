@@ -30,5 +30,12 @@ services/validation/    @shruthi
 services/modelwork/     @tharun
 
 libs/observability/     @suchit @shree @shruthi @tharun
+libs/queue/             @suchit
+libs/storage/           @suchit
+libs/outbox/            @suchit
+libs/envelope/          @suchit @shree @shruthi @tharun
+libs/masking/           @suchit
+libs/audit/             @suchit
 gateway/                @suchit
 infra/                  @suchit
+docs/adr/               @suchit

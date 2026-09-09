@@ -1,4 +1,57 @@
-"""DB models — import shapes from contracts.generated.python, don't redefine
-a schema here. TODO: wire SQLAlchemy models once contracts/generated/python
-is produced by contracts/codegen/generate.sh.
+"""DB models. Shapes come from `contracts/schemas/*.json` where a schema
+exists — this module is the SQLAlchemy mapping onto those shapes plus the
+supporting entities from PRD §06, not an independent source of truth.
+`landenvelope.WorkEnvelope` and `landoutbox.OutboxMessage` are mapped in
+their own packages, not here — see `entities.py`'s module docstring.
 """
+from backend.models.base import Base, engine_from_env, session_factory
+from backend.models.entities import (
+    AuditSample,
+    Batch,
+    Conflict,
+    ConfigVersion,
+    Correction,
+    Extraction,
+    FixityCheck,
+    LegacyRecordRef,
+    ModelVersion,
+    MutationEvent,
+    OwnerShare,
+    Page,
+    ParcelGeometry,
+    Record,
+    RecordAssembly,
+    RescanTask,
+    ReviewTask,
+    SourceDocument,
+    ValidationResult,
+    VolumeIndex,
+    WriterCluster,
+)
+
+__all__ = [
+    "Base",
+    "engine_from_env",
+    "session_factory",
+    "AuditSample",
+    "Batch",
+    "Conflict",
+    "ConfigVersion",
+    "Correction",
+    "Extraction",
+    "FixityCheck",
+    "LegacyRecordRef",
+    "ModelVersion",
+    "MutationEvent",
+    "OwnerShare",
+    "Page",
+    "ParcelGeometry",
+    "Record",
+    "RecordAssembly",
+    "RescanTask",
+    "ReviewTask",
+    "SourceDocument",
+    "ValidationResult",
+    "VolumeIndex",
+    "WriterCluster",
+]

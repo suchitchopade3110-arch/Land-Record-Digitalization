@@ -1,0 +1,16 @@
+[project]
+name = "landaudit"
+version = "0.1.0"
+description = "FR-PUB-03/08/09 — hash-chained append-only audit log, sharded by shard_id, value hashes never values (FR-SEC-08)."
+requires-python = ">=3.11"
+dependencies = ["sqlalchemy>=2.0"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "psycopg[binary]>=3.1"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
