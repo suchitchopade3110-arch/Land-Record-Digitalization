@@ -31,7 +31,7 @@ down:
 
 install: ## Editable-install every lib and service into the current Python env.
 	pip install -e $(LIBS) $(SERVICES)
-	pip install pytest jsonschema pyyaml ruff  # test/lint tooling, matching .github/workflows/*.yml
+	pip install pytest jsonschema pyyaml ruff==0.16.6  # test/lint tooling, pinned to match .github/workflows/*.yml
 
 # ---- schema ----
 
@@ -52,7 +52,7 @@ seed: ## Load a small fake batch/document/page so the API has something to show.
 # ---- quality gates ----
 
 lint:
-	ruff check $(LIBS:%=%/src) $(SERVICES:%=%/src)
+	python -m ruff check $(LIBS:%=%/src) $(SERVICES:%=%/src)
 
 test-unit:
 	for svc in $(SERVICES); do python -m pytest $$svc/tests/unit -v || exit 1; done

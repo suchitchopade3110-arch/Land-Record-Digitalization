@@ -11,11 +11,11 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from landqueue.port import QueuePort
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from landoutbox.models import OutboxMessage
-from landqueue.port import QueuePort
 
 
 class Relay:

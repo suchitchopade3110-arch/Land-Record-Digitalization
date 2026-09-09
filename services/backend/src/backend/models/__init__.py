@@ -8,8 +8,8 @@ from backend.models.base import Base, engine_from_env, session_factory
 from backend.models.entities import (
     AuditSample,
     Batch,
-    Conflict,
     ConfigVersion,
+    Conflict,
     Correction,
     Extraction,
     FixityCheck,
@@ -30,13 +30,11 @@ from backend.models.entities import (
 )
 
 __all__ = [
-    "Base",
-    "engine_from_env",
-    "session_factory",
     "AuditSample",
+    "Base",
     "Batch",
-    "Conflict",
     "ConfigVersion",
+    "Conflict",
     "Correction",
     "Extraction",
     "FixityCheck",
@@ -54,4 +52,6 @@ __all__ = [
     "ValidationResult",
     "VolumeIndex",
     "WriterCluster",
+    "engine_from_env",
+    "session_factory",
 ]

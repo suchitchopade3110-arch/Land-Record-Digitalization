@@ -19,8 +19,8 @@ __all__ = [
     "ObjectStorePort",
     "PutResult",
     "digest_of",
-    "key_for",
     "get_store",
+    "key_for",
 ]
 
 

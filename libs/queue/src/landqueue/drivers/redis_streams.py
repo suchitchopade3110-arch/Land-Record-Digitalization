@@ -8,7 +8,6 @@ import json
 from typing import Any
 
 import redis
-
 from landqueue.port import QueueMessage, QueuePort
 
 _PAYLOAD_FIELD = "envelope"

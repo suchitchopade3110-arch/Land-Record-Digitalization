@@ -22,7 +22,7 @@ jobs:
         run: |
           pip install -e libs/observability -e libs/queue -e libs/storage -e libs/outbox -e libs/envelope -e libs/masking -e libs/audit
           pip install -e "services/${{ matrix.service }}"
-          pip install pytest ruff
+          pip install pytest ruff==0.16.6  # pinned — see ruff.toml's header for why
 
       - name: Lint
         run: ruff check "services/${{ matrix.service }}/src"

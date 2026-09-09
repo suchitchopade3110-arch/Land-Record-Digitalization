@@ -6,7 +6,7 @@ and/or MAP_QUEUE.
 """
 from __future__ import annotations
 
-from typing import Callable
+from collections.abc import Callable
 
 from landenvelope import pin
 from landenvelope.pin import WorkEnvelope

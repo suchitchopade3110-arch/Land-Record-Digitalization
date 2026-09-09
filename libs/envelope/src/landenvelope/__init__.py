@@ -9,12 +9,12 @@ from landenvelope.scope import (
 
 __all__ = [
     "EnvelopeBase",
-    "WorkEnvelope",
     "IncompleteModelVersions",
-    "pin",
-    "read",
     "LiveResolutionInsidePinnedScope",
+    "WorkEnvelope",
     "current_pinned_envelope_id",
     "guard_resolve_active",
+    "pin",
     "pinned_scope",
+    "read",
 ]
