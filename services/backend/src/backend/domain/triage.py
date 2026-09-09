@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from landenvelope import pin
+from landenvelope import find_by_page, pin
 from landenvelope.pin import WorkEnvelope
 from landoutbox import write as outbox_write
 from observability.envelope import emit
@@ -49,14 +49,24 @@ def route_page(
     outbox writes happen in `session`'s transaction, uncommitted — the
     caller (the queue worker) commits once, so "pinned" and "queued the
     next hop(s)" land together (ADR-005).
+
+    Replay-safe (T2.d, FR-TRI-09): if `page_id` already has a pinned
+    envelope (a redelivered/replayed triage message), `resolve_model_versions`
+    is never even called — "never resolve current model mid-pipeline"
+    means not asking the registry a second time, not just discarding its
+    answer — and the existing envelope is reused unchanged. `pin()` itself
+    would also catch this (get-or-create by page_id), but checking here
+    first is what avoids the pointless registry round-trip on a replay.
     """
-    envelope = pin(
-        session,
-        document_id=document_id,
-        page_id=page_id,
-        model_versions=resolve_model_versions(),
-        config_version=config_version,
-    )
+    envelope = find_by_page(session, page_id)
+    if envelope is None:
+        envelope = pin(
+            session,
+            document_id=document_id,
+            page_id=page_id,
+            model_versions=resolve_model_versions(),
+            config_version=config_version,
+        )
 
     lanes = lane_for(doc_type=doc_type, page_role=page_role)
     trace_id = f"{document_id}:{page_id}"

@@ -10,13 +10,18 @@ trains on the suite it is graded against.
 **Phase 1 is complete and `make verify` is green** (contracts, storage,
 queue port, the four hard invariants enforced as real, failing-write
 database properties, and a fake end-to-end run — see `CLAUDE.md` and
-`docs/adr/`). Everything owned by the other three teammates (M3/M4 text and
-map lanes, M6/M7 validators and entity resolution, M2's classifiers, M8
-confidence/novelty, M11 learning loop) remains scaffolding — see each
-service's own README for its P0 build list and current implementation
-status, and `docs/open-questions.md` for what's blocked on a departmental
-answer. Every still-unimplemented file carries a `TODO:` comment naming the
-PRD requirement ID (FR-...) it will eventually satisfy.
+`docs/adr/`). **Phase 2 (the acquisition band — batch ingest, custody,
+page split, fixity, volume completeness, triage routing) is also
+complete** — see `PHASE2.md` for the build report, including the fixture
+stand-ins for the classifiers/legibility-scorer/config-service Phase 2's
+code calls but doesn't implement. Everything else owned by the other
+three teammates (M3/M4 text and map lanes, M6/M7 validators and entity
+resolution, M2's classifiers, M8 confidence/novelty, M11 learning loop)
+remains scaffolding — see each service's own README for its P0 build list
+and current implementation status, and `docs/open-questions.md` for what's
+blocked on a departmental answer. Every still-unimplemented file carries a
+`TODO:` comment naming the PRD requirement ID (FR-...) it will eventually
+satisfy.
 
 ## Start here
 
@@ -127,7 +132,7 @@ live, machine-readable list. Summary:
 | `/config/{scope}/{key}` | GET | Suchit | backend | stub (FR-CFG-01/02, Phase 5) |
 | `/models/{module}/active` | GET | Tharun | modelwork | stub |
 | `/closed-sets/{type}` | GET | Suchit + Shruthi | backend | stub |
-| `/documents` | POST | Suchit | backend | stub (Phase 2) |
+| `/documents` | POST | Suchit | backend | **live** — custody, dedupe, page split, batch metadata (Phase 2, see `PHASE2.md`) |
 | `/review-tasks` | GET | Suchit | backend | **live** — masked serialization, real DB |
 | `/conflicts` | GET | Suchit | backend | stub (Phase 3) |
 | `/dashboard/metrics` | GET | Suchit | backend | stub (Phase 5) |

@@ -31,13 +31,13 @@ stage reads from instead of a live registry lookup.
 
 Copied from Team-Split-4-Persons.md §Person 1 — do not let this drift from the source doc:
 
-| Item | FR ref |
-|---|---|
-| Ingest, SHA-256, immutable object store, page split | FR-ING-01–04 |
-| Scheduled fixity re-verification | FR-ING-07 |
-| Volume completeness (self-index reconstruction, gap alert) | FR-ING-08 |
-| Work envelope: pin model_version + config_version at triage | FR-TRI-09 |
-| RescanTask lifecycle | (M2) |
+| Item | FR ref | Status |
+|---|---|---|
+| Ingest, SHA-256, immutable object store, page split | FR-ING-01–04 | done — Phase 2, `PHASE2.md` |
+| Scheduled fixity re-verification | FR-ING-07 | done — Phase 2 |
+| Volume completeness (self-index reconstruction, gap alert) | FR-ING-08 | done — Phase 2 |
+| Work envelope: pin model_version + config_version at triage | FR-TRI-09 | done — Phase 1, replay-idempotence hardened in Phase 2 |
+| RescanTask lifecycle | (M2) | done — Phase 2 |
 | Queue-backed, idempotent workers across all stages | §04, §07 |
 | Review task queue, crop delivery, keyboard-first UI backend | FR-REV-01–04 |
 | Audit-sample tasks visually identical to routed tasks | FR-REV-11 |

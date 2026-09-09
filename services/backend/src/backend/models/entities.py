@@ -46,6 +46,11 @@ def _now() -> datetime:
 
 
 class Batch(Base):
+    """FR-ING-05 batch metadata. `district` is the only mandatory field —
+    rejected at ingest (`backend.domain.ingest.validate_batch_metadata`)
+    rather than discovered missing at normalize, because unit conversion
+    depends on it (P2-05)."""
+
     __tablename__ = "batch"
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
     district: Mapped[str] = mapped_column(String, nullable=False)  # mandatory — FR-ING-05
@@ -53,6 +58,7 @@ class Batch(Base):
     village: Mapped[str | None] = mapped_column(String)
     series: Mapped[str | None] = mapped_column(String)
     custodian: Mapped[str | None] = mapped_column(String)
+    scanning_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # FR-ING-05
     ingested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
@@ -71,6 +77,7 @@ class Page(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
     document_id: Mapped[str] = mapped_column(String, ForeignKey("source_document.id"), nullable=False, index=True)
     index: Mapped[int] = mapped_column(Integer, nullable=False)
+    storage_uri: Mapped[str | None] = mapped_column(String)  # FR-ING-03 — this page's own content-addressed key
     index_position: Mapped[int | None] = mapped_column(Integer)  # FR-ING-08 register's own page number
     quality_score: Mapped[float | None] = mapped_column(Float)  # *Tharun — FR-TRI-01
     legibility_band: Mapped[str | None] = mapped_column(String)  # good|marginal|poor — FR-TRI-10
@@ -299,6 +306,13 @@ class AuditSample(Base):
 
 
 class RescanTask(Base):
+    """M2, FR-TRI-01. Created from Tharun's legibility-threshold breach
+    event (a fixture-backed fake stands in for that event —
+    `backend.domain.rescan`; the legibility scorer itself is Tharun's, not
+    backend's, per Team-Split). `state` lifecycle: open -> assigned ->
+    closed, enforced below as a DB CHECK (added in migration 0003 for a
+    pre-existing table; present from creation for a fresh one)."""
+
     __tablename__ = "rescan_task"
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
     page_id: Mapped[str] = mapped_column(String, ForeignKey("page.id"), nullable=False, index=True)
@@ -307,6 +321,12 @@ class RescanTask(Base):
     state: Mapped[str] = mapped_column(String, nullable=False, server_default="open")
     opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('open','assigned','closed')", name="ck_rescan_task_state_enum",
+        ),
+    )
 
 
 class Conflict(Base):
@@ -421,6 +441,12 @@ class VolumeIndex(Base):
 
 
 class FixityCheck(Base):
+    """FR-ING-07. `store` distinguishes which of the two independently-
+    credentialed copies (`landstorage.get_store()` / `get_secondary_store()`)
+    this row's check ran against — the sweep (`backend.domain.fixity`)
+    checks both, since a compromised primary key rewriting the primary
+    copy is exactly the failure mode a second, unchecked copy would miss."""
+
     __tablename__ = "fixity_check"
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
     document_id: Mapped[str] = mapped_column(String, ForeignKey("source_document.id"), nullable=False, index=True)
@@ -428,8 +454,12 @@ class FixityCheck(Base):
     observed_digest: Mapped[str | None] = mapped_column(String)
     checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     outcome: Mapped[str] = mapped_column(String, nullable=False)
+    store: Mapped[str] = mapped_column(String, nullable=False, server_default="primary")
 
-    __table_args__ = (CheckConstraint("outcome IN ('match','mismatch')", name="ck_fixity_check_outcome_enum"),)
+    __table_args__ = (
+        CheckConstraint("outcome IN ('match','mismatch')", name="ck_fixity_check_outcome_enum"),
+        CheckConstraint("store IN ('primary','secondary')", name="ck_fixity_check_store_enum"),
+    )
 
 
 class LegacyRecordRef(Base):

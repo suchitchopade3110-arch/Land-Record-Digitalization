@@ -11,3 +11,4 @@ dist/
 build/
 .env
 .DS_Store
+dump.rdb
