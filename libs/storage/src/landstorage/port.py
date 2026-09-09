@@ -99,6 +99,20 @@ class ObjectStorePort(abc.ABC):
         not necessarily a context manager depending on the driver — wrap
         in `contextlib.closing` if in doubt)."""
 
+    def sign_get(self, key: str, ttl_seconds: int) -> str:
+        """FR-REV-01/FR-SEC-08 (Phase 3, P3-04) — a short-TTL,
+        access-controlled URL for retrieving `key`, never the object's
+        bytes or an unsigned path. Default implementation: an
+        application-level HMAC token (`landstorage.signing`) — good
+        enough for the `local_fs` dev/test driver and any driver that
+        doesn't have its own presigning mechanism. `S3ObjectStore`
+        overrides this with a real provider-native presigned URL.
+        """
+        from landstorage.signing import sign
+
+        signature, expires_at = sign(key, ttl_seconds)
+        return f"/objects/{key}?exp={expires_at}&sig={signature}"
+
     @abc.abstractmethod
     def _write_new_object(self, key: str, fileobj: IO[bytes]) -> None:
         """Write `fileobj` (positioned at 0, containing exactly the bytes

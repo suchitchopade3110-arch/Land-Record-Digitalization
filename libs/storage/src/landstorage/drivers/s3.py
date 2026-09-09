@@ -93,6 +93,15 @@ class S3ObjectStore(ObjectStorePort):
         expected_digest = key.rsplit("/", 1)[-1]
         return digest_of(data) == expected_digest
 
+    def sign_get(self, key: str, ttl_seconds: int) -> str:
+        # S3's own presigning is stronger than the generic HMAC fallback
+        # (`ObjectStorePort.sign_get`) — it's verified by the object store
+        # itself, not by this application re-checking a signature it
+        # minted. FR-REV-01/FR-SEC-08 (Phase 3, P3-04).
+        return self._s3.generate_presigned_url(
+            "get_object", Params={"Bucket": self._bucket, "Key": key}, ExpiresIn=ttl_seconds
+        )
+
     def open_stream(self, key: str) -> BinaryIO:
         try:
             resp = self._s3.get_object(Bucket=self._bucket, Key=key)

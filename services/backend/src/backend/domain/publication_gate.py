@@ -84,18 +84,31 @@ def check_open_conflict(session: Session, record_id: str) -> BlockReason | None:
     """FR-CFL-03 — the conflict-register caller (Phase 3's, wired here
     since it's the same mechanism this phase builds; `backend.domain.
     conflict_register.is_publish_blocked` is a thin wrapper kept for
-    callers that only care about the boolean)."""
+    callers that only care about the boolean).
+
+    P3-11: the blocking-state set is config
+    (`backend.domain.review_policy.BLOCKING_CONFLICT_STATES`), not a
+    hard-coded `state != 'resolved'` at this call site — a future policy
+    change to which states block (e.g. treating `referred` as
+    non-blocking) is then a one-line config change, not a hunt for every
+    gate that inlined the complement.
+    """
+    from backend.domain.review_policy import BLOCKING_CONFLICT_STATES
     from backend.models.entities import Conflict
 
     open_conflicts = (
         session.query(Conflict)
         .filter(Conflict.records.any(record_id))
-        .filter(Conflict.state != "resolved")
+        .filter(Conflict.state.in_(BLOCKING_CONFLICT_STATES))
         .all()
     )
     if not open_conflicts:
         return None
     return BlockReason(
         code="open_conflict",
-        detail={"record_id": record_id, "conflict_ids": [c.id for c in open_conflicts]},
+        detail={
+            "record_id": record_id,
+            "conflict_ids": [c.id for c in open_conflicts],
+            "rules": [c.rule for c in open_conflicts],
+        },
     )

@@ -7,21 +7,21 @@ tests rather than inventing a new top-level category for one file.
 import os
 
 import pytest
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import Session
-
-from backend.domain.decision import route
+from backend.domain.decision import UnroutableExtraction, route
 from backend.domain.triage import lane_for, route_page
 from backend.models.entities import (
     AuditSample,
     Batch,
     Conflict,
     Extraction,
+    OperationalAlert,
     Page,
     ReviewTask,
     SourceDocument,
 )
 from landoutbox.models import OutboxMessage
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import Session
 
 TEST_DB_URL = os.environ.get(
     "TEST_DATABASE_URL", "postgresql+psycopg://dev:dev@localhost:5432/landrecords_test"
@@ -202,6 +202,61 @@ def test_outside_calibrated_regime_creates_no_review_task_per_field(session, a_p
 
     assert result["outcome"] == "outside_calibrated_regime"
     assert session.query(ReviewTask).filter_by(extraction_id=e.id).count() == 0
+
+
+# ---- T3.e: unknown routing_outcome dead-letters, cluster dedup (P3-01/02) ----
+
+def test_unrecognised_routing_outcome_raises_never_defaults_to_review(session, a_page):
+    # `ck_extraction_routing_outcome_enum` already refuses this value at
+    # the DB layer (belt and braces, same as every other invariant in this
+    # repo) — a genuinely unrecognised value can only exist as an
+    # in-session mutation, not a committed row, which is exactly what this
+    # test exercises: `route()`'s own guard, not the DB constraint's.
+    e = _extraction(session, a_page, "auto_accept")
+    e.routing_outcome = "not_a_real_outcome"
+
+    # `route()`'s own guard runs before any autoflush would hand this
+    # in-memory-only value to the DB constraint — `no_autoflush` keeps
+    # this test isolated to that guard rather than incidentally re-proving
+    # the CHECK constraint (already covered: the object is already in the
+    # identity map, so `session.get` inside `route` needs no DB roundtrip).
+    with session.no_autoflush, pytest.raises(UnroutableExtraction):
+        route(session, e.id)
+    # Never let the in-memory-only invalid value reach the DB at all —
+    # revert it before the next query, rather than relying on every
+    # subsequent statement in this test staying inside `no_autoflush`.
+    session.expunge(e)
+    # never silently created a review task under the "default to review" behavior the brief forbids
+    assert session.query(ReviewTask).filter_by(extraction_id=e.id).count() == 0
+
+
+def test_outside_calibrated_regime_cluster_of_n_raises_one_alert_not_n_tasks(session, a_page):
+    import uuid
+
+    cluster_key = f"cluster-{uuid.uuid4()}"  # unique per run — this suite shares a DB across test modules/runs
+    extractions = [_extraction(session, a_page, "outside_calibrated_regime") for _ in range(4)]
+    results = [route(session, e.id, novelty_cluster_id=cluster_key) for e in extractions]
+    session.commit()
+
+    alert_ids = {r["alert_id"] for r in results}
+    assert len(alert_ids) == 1  # one alert for the whole cluster
+    assert results[0]["deduplicated"] is False
+    assert all(r["deduplicated"] for r in results[1:])
+
+    alert = session.get(OperationalAlert, alert_ids.pop())
+    assert set(alert.extraction_ids) == {e.id for e in extractions}
+    assert session.query(ReviewTask).filter(ReviewTask.extraction_id.in_([e.id for e in extractions])).count() == 0
+
+
+def test_two_different_clusters_raise_two_separate_alerts(session, a_page):
+    e1 = _extraction(session, a_page, "outside_calibrated_regime")
+    e2 = _extraction(session, a_page, "outside_calibrated_regime")
+
+    r1 = route(session, e1.id, novelty_cluster_id="cluster-a")
+    r2 = route(session, e2.id, novelty_cluster_id="cluster-b")
+    session.commit()
+
+    assert r1["alert_id"] != r2["alert_id"]
 
 
 def test_every_routing_decision_writes_an_audit_event(session, a_page):

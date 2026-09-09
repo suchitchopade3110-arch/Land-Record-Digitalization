@@ -10,10 +10,20 @@ already set on the `Extraction` it receives.
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from landaudit import append as audit_append
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from backend.models.entities import AuditSample, Conflict, Extraction, ReviewTask
+from backend.domain.review_policy import NOVELTY_CLUSTER_ALERT_DEDUP_WINDOW
+from backend.models.entities import (
+    AuditSample,
+    Conflict,
+    Extraction,
+    OperationalAlert,
+    ReviewTask,
+)
 
 VALID_ROUTING_OUTCOMES = {
     "auto_accept",
@@ -25,15 +35,32 @@ VALID_ROUTING_OUTCOMES = {
 
 
 class UnroutableExtraction(ValueError):
-    pass
+    """P3-01 — an unrecognised `routing_outcome` is a hard failure, never
+    a silent default to `review`. This module has no DLQ to hand it to
+    yet (`landqueue.port` names dead-letter handling as Phase 5 scope) —
+    raising here is what makes the queue consumer
+    (`backend.workers.decision_engine.handle`) fail the message loudly
+    instead of committing a guessed outcome, which is the property that
+    actually matters until Phase 5's DLQ+alert wiring lands."""
 
 
-def route(session: Session, extraction_id: str) -> dict:
+def route(session: Session, extraction_id: str, *, novelty_cluster_id: str | None = None) -> dict:
     """Dispatch on `Extraction.routing_outcome` (already set upstream by
     Tharun's M8). Returns a small dict describing what was created, for
     the caller (the queue worker) to log/publish onward. Every branch
     writes an audit event — FR-PUB-03 covers every automated decision,
     not just human ones.
+
+    `novelty_cluster_id`: P3-02/FR-CNF-14's cluster identity, supplied by
+    Tharun's novelty engine. There is no `contracts/` field for this yet
+    — `Extraction.novelty_score` is a per-field score, not a cluster
+    handle, and adding one is exactly the kind of `contracts/` edit
+    CLAUDE.md says to raise, not make. Until that lands, a caller with a
+    real cluster id passes it explicitly (a fixture-backed fake stands in
+    where nothing produces one yet, per PHASE3.md); omitting it falls
+    back to `extraction_id` itself, i.e. every novel field is its own
+    singleton cluster — degrades to "one alert per field" rather than
+    silently merging unrelated novel pages into one cluster.
     """
     extraction = session.get(Extraction, extraction_id)
     if extraction is None:
@@ -51,7 +78,7 @@ def route(session: Session, extraction_id: str) -> dict:
     elif outcome == "conflict":
         result = _open_conflict_placeholder(session, extraction)
     else:  # outside_calibrated_regime
-        result = _outside_calibrated_regime(session, extraction)
+        result = _outside_calibrated_regime(session, extraction, novelty_cluster_id or extraction.id)
 
     audit_append(
         session, actor="system:decision-engine", action=f"decision.route.{outcome}", subject=extraction.id,
@@ -114,13 +141,41 @@ def _open_conflict_placeholder(session: Session, extraction: Extraction) -> dict
     return {"outcome": "conflict", "conflict_id": conflict.id}
 
 
-def _outside_calibrated_regime(session: Session, extraction: Extraction) -> dict:
+def _outside_calibrated_regime(session: Session, extraction: Extraction, cluster_key: str) -> dict:
     """FR-CNF-14 — never auto-accepted at any calibrated confidence, and a
-    *cluster* of novel pages raises one operational alert rather than a
-    stream of per-field review tasks. This P0 path records the single
-    audit event per field (the alert-clustering logic itself is Tharun's
-    M8/dashboard aggregation territory, FR-ANL-12) — no `ReviewTask` is
-    created, matching the PRD's explicit "not a stream of per-field
-    tasks" requirement.
+    *cluster* of novel pages raises ONE operational alert, not a stream of
+    per-field review tasks (P3-02). No `ReviewTask` is created here,
+    matching the PRD's explicit "not a stream of per-field tasks"
+    requirement.
+
+    Dedup is on `cluster_key` within `NOVELTY_CLUSTER_ALERT_DEDUP_WINDOW`:
+    a second extraction from the same cluster inside the window is folded
+    into the existing `OperationalAlert` (its id appended to
+    `extraction_ids`); outside the window, or for a new cluster, a fresh
+    alert opens. Backend does not compute cluster membership itself — the
+    caller supplies `cluster_key` (see `route`'s docstring).
     """
-    return {"outcome": "outside_calibrated_regime", "extraction_id": extraction.id}
+    cutoff = datetime.now(timezone.utc) - NOVELTY_CLUSTER_ALERT_DEDUP_WINDOW
+    existing = session.execute(
+        select(OperationalAlert)
+        .where(
+            OperationalAlert.kind == "outside_calibrated_regime",
+            OperationalAlert.cluster_key == cluster_key,
+            OperationalAlert.opened_at >= cutoff,
+        )
+        .order_by(OperationalAlert.opened_at.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+
+    if existing is not None:
+        if extraction.id not in existing.extraction_ids:
+            existing.extraction_ids = [*existing.extraction_ids, extraction.id]
+        session.flush()
+        return {"outcome": "outside_calibrated_regime", "extraction_id": extraction.id, "alert_id": existing.id, "deduplicated": True}
+
+    alert = OperationalAlert(
+        kind="outside_calibrated_regime", cluster_key=cluster_key, extraction_ids=[extraction.id],
+    )
+    session.add(alert)
+    session.flush()
+    return {"outcome": "outside_calibrated_regime", "extraction_id": extraction.id, "alert_id": alert.id, "deduplicated": False}
