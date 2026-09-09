@@ -6,11 +6,13 @@ an undocumented path.
 from fastapi import FastAPI
 
 from backend.api import (
+    chain,
     closed_sets,
     config_service,
     conflicts,
     dashboard,
     documents,
+    records,
     review_tasks,
 )
 
@@ -22,6 +24,8 @@ app.include_router(closed_sets.router)
 app.include_router(review_tasks.router)
 app.include_router(conflicts.router)
 app.include_router(dashboard.router)
+app.include_router(records.router)
+app.include_router(chain.router)
 
 
 @app.get("/healthz")

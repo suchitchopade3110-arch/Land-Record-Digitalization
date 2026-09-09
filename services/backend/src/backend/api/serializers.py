@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from landmasking import ROLES_THAT_SEE_PERSONAL_DATA_UNMASKED
 from landmasking import apply as mask_apply
 from pydantic import BaseModel
 
@@ -99,23 +100,104 @@ class MaskedExtractionView(BaseModel):
     masked: bool
 
 
+class MaskedRecordView(BaseModel):
+    """P4-10/FR-SEC-02/ADR-007 — the one shape a `Record` may take once it
+    leaves this process. Every route that can return record data
+    (`GET /records/{id}`, provenance navigation, anywhere else a record's
+    fields surface) builds this, never a hand-rolled dict — "masking is a
+    property of a single serialization type, not a set of call sites."
+    Wraps a list of `MaskedExtractionView` (already masks all three places
+    per field — value/raw_value/crop_uri, ADR-007) plus the edit-history
+    entries for each field, masked the identical way (a corrected/predicted
+    value in a maker-checker'd personal-data field is exactly as much a
+    leak as the current value).
+    """
+
+    record_id: str
+    version: int
+    status: str | None
+    fields: list[MaskedExtractionView]
+
+
+class MaskedEditHistoryEntry(BaseModel):
+    actor: str
+    predicted: str | None
+    corrected: str | None
+    at: str
+    masked: bool
+
+
+def mask_edit_history_entry(entry: Any, *, field_class: str, role: str) -> MaskedEditHistoryEntry:
+    """The edit-history half of the "three places" masking rule
+    (ADR-007's `raw_value`) — a `predicted`/`corrected` pair in a
+    personal-data field's `Correction` history is provenance raw value in
+    every sense that matters, so it goes through the identical
+    `landmasking.apply` gate as the field's own `raw_value`."""
+    masked = mask_apply(
+        value=None, raw_value=entry.predicted, crop_uri=None, field_class=field_class, role=role,
+    )
+    masked_corrected = mask_apply(
+        value=None, raw_value=entry.corrected, crop_uri=None, field_class=field_class, role=role,
+    )
+    return MaskedEditHistoryEntry(
+        actor=entry.actor,
+        predicted=masked.raw_value,
+        corrected=masked_corrected.raw_value,
+        at=entry.at,
+        masked=masked.masked,
+    )
+
+
+def build_masked_record_view(
+    record_id: str, version: int, status: str | None, extractions: list[dict[str, Any]], role: str,
+) -> MaskedRecordView:
+    """P4-10 — the entrypoint every record-reading route calls. Builds
+    every field's masked view through `mask_extraction_for_role`, never
+    lets a caller assemble the response dict by hand (which is exactly
+    the "a set of call sites" ADR-007 says not to allow)."""
+    return MaskedRecordView(
+        record_id=record_id,
+        version=version,
+        status=status,
+        fields=[mask_extraction_for_role(e, role) for e in extractions],
+    )
+
+
 def mask_extraction_for_role(extraction: dict[str, Any], role: str) -> MaskedExtractionView:
     """FR-SEC-02 — mask value, provenance.raw_value, and crop_uri together,
     never independently, based on `role`. `extraction["field_name"]`
     doubles as the field class `landmasking` checks against
     `PERSONAL_DATA_FIELD_CLASSES` — this schema has no separate field-class
     taxonomy at P0 (single pilot document type, FR-EXT-01).
+
+    P4-10: "the crop is masked by refusing to issue the signed URL, not
+    by blurring after the fact" — the signed URL is only ever *computed*
+    when the masking decision already allows it (`is_personal_data`
+    checked before calling `landstorage.sign_get`, not after); a masked
+    field never has a real signed URL exist anywhere, even transiently,
+    for `mask_apply` to then discard. `extraction["page_storage_uri"]` is
+    optional — omitted (e.g. by a caller with no crop to offer) simply
+    yields no `crop_uri` either way.
     """
-    crop_uri = (
-        f"/pages/{extraction['page_id']}/crop?bbox={extraction['bbox']}"
-        if extraction.get("bbox") is not None
-        else None
-    )
+    from landmasking import is_personal_data
+
+    field_class = extraction["field_name"]
+    would_be_masked = is_personal_data(field_class) and role not in ROLES_THAT_SEE_PERSONAL_DATA_UNMASKED
+
+    crop_uri = None
+    if not would_be_masked and extraction.get("bbox") is not None and extraction.get("page_storage_uri"):
+        from landstorage import get_store
+
+        from backend.domain.review_policy import CROP_URL_TTL_SECONDS
+
+        signed = get_store().sign_get(extraction["page_storage_uri"], CROP_URL_TTL_SECONDS)
+        crop_uri = f"{signed}&bbox={extraction['bbox']}" if "?" in signed else f"{signed}?bbox={extraction['bbox']}"
+
     masked = mask_apply(
         value=extraction.get("canonical_value"),
         raw_value=extraction.get("raw_value"),
         crop_uri=crop_uri,
-        field_class=extraction["field_name"],
+        field_class=field_class,
         role=role,
     )
     return MaskedExtractionView(

@@ -30,6 +30,30 @@ services:
     image: redis:7
     ports: ["6379:6379"]
 
+  # P4-05/FR-PUB-08 — the second store the audit chain's global root is
+  # anchored to. A GENUINELY SEPARATE service (its own container, its own
+  # root credential — `ANCHOR_STORE_ROOT_USER`/`ANCHOR_STORE_ROOT_PASSWORD`
+  # below are never derived from `minio`'s `MINIO_ROOT_*` above, the same
+  # "never derived from" posture P2-06's SECONDARY_OBJECT_STORE_* already
+  # established for the fixity-sweep's second copy). `backend`'s own
+  # environment below is deliberately given a *different*, narrower
+  # credential (`ANCHOR_STORE_ACCESS_KEY_ID`/`ANCHOR_STORE_SECRET_ACCESS_KEY`,
+  # a bucket-scoped MinIO user this compose file provisions with a
+  # write-only ("PutObject", no "GetObject"/"ListBucket") policy) — see
+  # PHASE4.md's "P0 form of the second store" section for exactly what
+  # this sandboxed environment could and could not verify about that
+  # policy actually being enforced (no docker daemon was available to
+  # bring this compose file up and test it end to end in this session).
+  anchor_store:
+    image: minio/minio
+    command: server /data --console-address ":9002"
+    environment:
+      MINIO_ROOT_USER: anchor-root-admin
+      MINIO_ROOT_PASSWORD: anchor-root-admin-password-CHANGE-ME
+    ports: ["9010:9000", "9011:9002"]
+    volumes:
+      - anchor_store_data:/data
+
   backend:
     build: ../services/backend
     environment:
@@ -48,9 +72,29 @@ services:
       # credential sets.
       SECONDARY_OBJECT_STORE_ROOT: /data/secondary-objects
       DROP_FOLDER_PATH: /data/drop-folder  # P2-01 — the watched-folder ingest entrypoint
+      # P4-05/FR-PUB-08 — the anchor store's own, third, independent
+      # credential namespace. `ANCHOR_STORE_ACCESS_KEY_ID`/`_SECRET_ACCESS_KEY`
+      # below are a SEPARATE, narrower-scoped MinIO user this backend
+      # container holds — NOT `anchor_store`'s `MINIO_ROOT_*` above, which
+      # only an operator provisioning the bucket/policy ever uses. This
+      # application container must never hold the anchor store's root
+      # credential; provisioning the scoped user + its write-only policy
+      # is an operator/deploy-time step (`mc admin policy` / MinIO IAM),
+      # not something `backend`'s own code does at runtime — the intent
+      # here is "the app container's env only ever HOLDS the narrow
+      # credential," which this compose file expresses even though this
+      # sandbox could not run it to confirm the policy is actually
+      # enforced server-side (see PHASE4.md).
+      ANCHOR_STORE_DRIVER: s3
+      ANCHOR_STORE_URL: http://anchor_store:9000
+      ANCHOR_STORE_BUCKET: audit-anchors
+      ANCHOR_STORE_ACCESS_KEY_ID: backend-anchor-writer
+      ANCHOR_STORE_SECRET_ACCESS_KEY: backend-anchor-writer-password-CHANGE-ME
+      ANCHOR_KMS_KEY_SEED: dev-only-anchor-kms-seed-CHANGE-ME  # P0 KMS sign-only stub seed — see landaudit.kms
+      AUDIT_HMAC_KEY: dev-only-audit-hmac-key-CHANGE-ME  # P4-07 — see PHASE4.md's HMAC key custody section for who else may/may not hold this
     volumes:
       - backend_data:/data
-    depends_on: [postgres, minio, redis]
+    depends_on: [postgres, minio, redis, anchor_store]
     ports: ["8001:8000"]
 
   extraction:
@@ -91,4 +135,5 @@ services:
 volumes:
   postgres_data:
   minio_data:
+  anchor_store_data:
   backend_data:

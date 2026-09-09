@@ -17,14 +17,51 @@ from landaudit.models import AuditEntry
 
 NUM_SHARDS = 8  # ADR-006 — enough to remove serial contention at pilot scale
 
+# P4-03/FR-PUB-09 — the shard-key strategy, decided and written down before
+# implementation (per the build prompt's own instruction, since retrofitting
+# a shard key means rewriting hashes that are supposed to be immutable).
+# See PHASE4.md's "shard-key strategy" section for the full rationale.
+#
+# `SYSTEM_SHARD_ID` is a *reserved* shard index, not just "whatever
+# subject/actor happens to hash to" — it is the defined fallback for entry
+# types with no natural district: config changes, role grants, login
+# events, anchor writes, reprocessing jobs. A caller asks for it explicitly
+# by passing `shard_key=SYSTEM_SHARD_KEY` (never falls into it by hashing).
+SYSTEM_SHARD_ID = 0
+SYSTEM_SHARD_KEY = "system"
+
 
 def shard_for(key: str) -> int:
-    """Deterministic shard assignment. `key` is conventionally `subject`
-    (e.g. a record or extraction id) so that all audit history for one
-    subject lands in one shard and can be walked without cross-shard
-    reads — pass `actor` only when there's no natural subject (e.g. a
-    login event)."""
+    """Deterministic shard assignment from a stable key. `key=SYSTEM_SHARD_KEY`
+    always resolves to the reserved system shard; any other key hashes into
+    the full `0..NUM_SHARDS-1` range (so a hash collision landing on shard 0
+    is expected and harmless — the system shard is reserved *by convention
+    of which keys route there*, not by carving out a dedicated numeric
+    range no other key may ever hash into).
+
+    Pre-Phase-4 callers passed `subject` (an extraction/task/conflict id)
+    as this key, which has no natural district — see PHASE4.md's
+    "shard-key strategy" section for why those call sites were not
+    retroactively rewired to a district key this phase (a real, named
+    gap, not a silent one)."""
+    if key == SYSTEM_SHARD_KEY:
+        return SYSTEM_SHARD_ID
     return int(hashlib.sha256(key.encode()).hexdigest(), 16) % NUM_SHARDS
+
+
+def shard_key_for(*, district: str | None = None, batch_id: str | None = None) -> str:
+    """FR-PUB-03/09 — the one place a caller turns "what district/batch is
+    this entry about" into the key `shard_for`/`append(shard_key=...)`
+    consumes. `district` wins when both are known (it's the more stable,
+    more human-legible grouping); `batch_id` is the fallback for an entry
+    type that knows its batch but not yet its district; `SYSTEM_SHARD_KEY`
+    is the fallback of last resort — always explicit, never a silent
+    default from an empty string hashing somewhere arbitrary."""
+    if district:
+        return f"district:{district}"
+    if batch_id:
+        return f"batch:{batch_id}"
+    return SYSTEM_SHARD_KEY
 
 
 def _compute_hash(prev_hash: str | None, actor: str, action: str, subject: str | None,
@@ -42,18 +79,34 @@ def append(
     purpose: str | None = None,
     value_hash: str | None = None,
     shard_id: int | None = None,
+    shard_key: str | None = None,
 ) -> AuditEntry:
     """Append one entry to the chain. `value_hash` — never the value
     itself (FR-SEC-08); callers hash a value before calling this, they
-    never pass the value in. Does not commit — the caller commits, in the
-    same transaction as whatever domain action this entry records, so the
-    audit trail and the action it describes are atomic with each other.
+    never pass the value in (see `landaudit.valuehash` for the keyed HMAC
+    that must produce it — a bare SHA-256 of a small-domain value like a
+    name or survey number is dictionary-attackable). Does not commit — the
+    caller commits, in the same transaction as whatever domain action this
+    entry records, so the audit trail and the action it describes are
+    atomic with each other.
+
+    Shard resolution, in priority order: an explicit `shard_id` (rare —
+    only when a caller already knows the exact partition, e.g. the
+    verifier); `shard_key` (P4-03's strategy — `landaudit.chain.shard_key_for`
+    turns a district/batch_id into this); falling back, for callers written
+    before P4-03, to hashing `subject or actor` directly (see `shard_for`'s
+    docstring for why this fallback exists and its known limitation).
 
     Locks the shard's most recent row (`FOR UPDATE`) before computing the
     next hash, so two concurrent writers to the same shard don't both
     compute a hash chained off the same `prev_hash`.
     """
-    resolved_shard = shard_id if shard_id is not None else shard_for(subject or actor)
+    if shard_id is not None:
+        resolved_shard = shard_id
+    elif shard_key is not None:
+        resolved_shard = shard_for(shard_key)
+    else:
+        resolved_shard = shard_for(subject or actor)
 
     last = session.execute(
         select(AuditEntry)
