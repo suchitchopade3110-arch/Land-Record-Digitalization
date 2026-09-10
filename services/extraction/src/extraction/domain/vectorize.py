@@ -167,53 +167,166 @@ def bind_survey_labels(
     polygons: list[dict[str, Any]],
     labels: list[dict[str, Any]],
     georef_result: GeoreferenceResult | None = None,
+    max_nearby_distance: float = 50.0,
 ) -> list[dict[str, Any]]:
-    """Binds OCR survey number labels to parcel polygons using spatial point-in-polygon containment."""
-    bound_polygons: list[dict[str, Any]] = []
+    """Binds OCR survey/khasra number labels to parcel polygons using spatial containment and proximity.
 
-    for poly_item in polygons:
+    Preserves:
+    - Label confidence
+    - Label source bounding box (bbox)
+    - Conflation lineage reference
+
+    Handles Ambiguity:
+    - If a label is contained in multiple parcels or equidistant to multiple candidate parcels -> marked ambiguous (bound_survey_no = None).
+    - If a parcel polygon contains multiple competing labels with different text -> marked ambiguous (bound_survey_no = None).
+    """
+    if not polygons:
+        return []
+
+    # 1. Precompute label coordinates and properties
+    prepared_labels: list[dict[str, Any]] = []
+    for idx, lbl in enumerate(labels):
+        text = lbl.get("raw_value") or lbl.get("canonical_value") or lbl.get("text")
+        if not text:
+            continue
+
+        pt_x: float | None = None
+        pt_y: float | None = None
+
+        if "geo_x" in lbl and "geo_y" in lbl:
+            pt_x, pt_y = float(lbl["geo_x"]), float(lbl["geo_y"])
+        elif "bbox" in lbl and georef_result:
+            bbox = lbl["bbox"]
+            cx = float(bbox.get("x", 0.0)) + float(bbox.get("w", 0.0)) / 2.0
+            cy = float(bbox.get("y", 0.0)) + float(bbox.get("h", 0.0)) / 2.0
+            pt_x, pt_y = georef_result.transform_point(cx, cy)
+        elif "x" in lbl and "y" in lbl:
+            lx, ly = float(lbl["x"]), float(lbl["y"])
+            if georef_result:
+                pt_x, pt_y = georef_result.transform_point(lx, ly)
+            else:
+                pt_x, pt_y = lx, ly
+        elif "bbox" in lbl:
+            bbox = lbl["bbox"]
+            pt_x = float(bbox.get("x", 0.0)) + float(bbox.get("w", 0.0)) / 2.0
+            pt_y = float(bbox.get("y", 0.0)) + float(bbox.get("h", 0.0)) / 2.0
+
+        if pt_x is None or pt_y is None:
+            continue
+
+        conf = lbl.get("confidence") if "confidence" in lbl else lbl.get("score")
+        bbox = lbl.get("bbox") or lbl.get("source_bbox")
+        lineage = lbl.get("conflation_lineage_ref") or lbl.get("lineage_id")
+
+        prepared_labels.append({
+            "index": idx,
+            "text": str(text),
+            "pt_x": pt_x,
+            "pt_y": pt_y,
+            "confidence": float(conf) if conf is not None else None,
+            "bbox": bbox,
+            "conflation_lineage_ref": lineage,
+            "raw_dict": lbl,
+        })
+
+    # 2. Map spatial containment / proximity for each parcel & label
+    parcel_candidates: dict[int, list[tuple[dict[str, Any], float, bool]]] = {
+        i: [] for i in range(len(polygons))
+    }
+    label_candidates: dict[int, list[tuple[int, float, bool]]] = {
+        lbl["index"]: [] for lbl in prepared_labels
+    }
+
+    for p_idx, poly_item in enumerate(polygons):
         poly_dict = poly_item.get("polygon")
         if not poly_dict or not poly_item.get("is_valid", True):
-            bound_polygons.append(poly_item)
             continue
 
         coords = poly_dict.get("coordinates", [[]])[0]
         if not coords or len(coords) < 3:
-            bound_polygons.append(poly_item)
             continue
 
-        matched_label: str | None = None
-
-        for lbl in labels:
-            lbl_text = lbl.get("raw_value") or lbl.get("canonical_value") or lbl.get("text")
-            if not lbl_text:
-                continue
-
-            if "geo_x" in lbl and "geo_y" in lbl:
-                pt_x, pt_y = float(lbl["geo_x"]), float(lbl["geo_y"])
-            elif "bbox" in lbl and georef_result:
-                bbox = lbl["bbox"]
-                cx = float(bbox.get("x", 0.0)) + float(bbox.get("w", 0.0)) / 2.0
-                cy = float(bbox.get("y", 0.0)) + float(bbox.get("h", 0.0)) / 2.0
-                pt_x, pt_y = georef_result.transform_point(cx, cy)
-            elif "x" in lbl and "y" in lbl and georef_result:
-                pt_x, pt_y = georef_result.transform_point(float(lbl["x"]), float(lbl["y"]))
-            else:
-                continue
+        for lbl in prepared_labels:
+            pt_x, pt_y = lbl["pt_x"], lbl["pt_y"]
+            is_inside = False
+            dist = 0.0
 
             if HAS_SHAPELY:
                 shapely_poly = ShapelyPolygon(coords)
                 lbl_pt = ShapelyPoint(pt_x, pt_y)
-                if shapely_poly.contains(lbl_pt) or shapely_poly.touches(lbl_pt):
-                    matched_label = lbl_text
-                    break
+                is_inside = shapely_poly.contains(lbl_pt) or shapely_poly.touches(lbl_pt)
+                dist = float(shapely_poly.distance(lbl_pt))
             else:
-                if _point_in_polygon_ring(pt_x, pt_y, coords):
-                    matched_label = lbl_text
-                    break
+                is_inside = _point_in_polygon_ring(pt_x, pt_y, coords)
+                dist = _point_to_polygon_distance(pt_x, pt_y, coords)
 
-        updated_item = {**poly_item, "bound_survey_no": matched_label}
-        bound_polygons.append(updated_item)
+            if is_inside:
+                parcel_candidates[p_idx].append((lbl, 0.0, True))
+                label_candidates[lbl["index"]].append((p_idx, 0.0, True))
+            elif dist <= max_nearby_distance:
+                parcel_candidates[p_idx].append((lbl, dist, False))
+                label_candidates[lbl["index"]].append((p_idx, dist, False))
+
+    # 3. Resolve bindings unambiguously
+    bound_polygons: list[dict[str, Any]] = []
+
+    for p_idx, poly_item in enumerate(polygons):
+        candidates = parcel_candidates.get(p_idx, [])
+        lineage = poly_item.get("conflation_lineage_ref")
+
+        if not candidates:
+            bound_polygons.append({
+                **poly_item,
+                "bound_survey_no": None,
+                "label_confidence": None,
+                "label_bbox": None,
+                "binding_status": "unbound",
+                "conflation_lineage_ref": lineage,
+            })
+            continue
+
+        inside_candidates = [c for c in candidates if c[2]]
+        pool = inside_candidates if inside_candidates else candidates
+        distinct_texts = set(c[0]["text"] for c in pool)
+
+        if len(distinct_texts) > 1:
+            bound_polygons.append({
+                **poly_item,
+                "bound_survey_no": None,
+                "label_confidence": None,
+                "label_bbox": None,
+                "binding_status": "ambiguous",
+                "conflation_lineage_ref": lineage,
+            })
+            continue
+
+        best_lbl, best_dist, is_inside = min(pool, key=lambda c: c[1])
+        lbl_idx = best_lbl["index"]
+
+        lbl_parcels = label_candidates[lbl_idx]
+        lbl_inside_parcels = [lp for lp in lbl_parcels if lp[2]]
+        competing_parcels = lbl_inside_parcels if is_inside else lbl_parcels
+
+        if len(competing_parcels) > 1:
+            bound_polygons.append({
+                **poly_item,
+                "bound_survey_no": None,
+                "label_confidence": None,
+                "label_bbox": None,
+                "binding_status": "ambiguous",
+                "conflation_lineage_ref": lineage or best_lbl["conflation_lineage_ref"],
+            })
+            continue
+
+        lbl_lineage = best_lbl["conflation_lineage_ref"] or lineage
+        bound_polygons.append({
+            **poly_item,
+            "bound_survey_no": best_lbl["text"],
+            "label_confidence": best_lbl["confidence"],
+            "label_bbox": best_lbl["bbox"],
+            "binding_status": "bound",
+            "conflation_lineage_ref": lbl_lineage,
+        })
 
     return bound_polygons
 
@@ -306,3 +419,32 @@ def _point_in_polygon_ring(px: float, py: float, coords: list[list[float]]) -> b
                         inside = not inside
         p1x, p1y = p2x, p2y
     return inside
+
+
+def _point_to_polygon_distance(px: float, py: float, coords: list[list[float]]) -> float:
+    """Computes minimum Euclidean distance from point (px, py) to polygon perimeter segments."""
+    import math
+
+    if not coords or len(coords) < 2:
+        return float("inf")
+
+    min_dist_sq = float("inf")
+    n = len(coords)
+    for i in range(n - 1):
+        x1, y1 = float(coords[i][0]), float(coords[i][1])
+        x2, y2 = float(coords[i + 1][0]), float(coords[i + 1][1])
+
+        dx, dy = x2 - x1, y2 - y1
+        if dx == 0.0 and dy == 0.0:
+            dist_sq = (px - x1) ** 2 + (py - y1) ** 2
+        else:
+            t = max(0.0, min(1.0, ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy)))
+            proj_x = x1 + t * dx
+            proj_y = y1 + t * dy
+            dist_sq = (px - proj_x) ** 2 + (py - proj_y) ** 2
+
+        if dist_sq < min_dist_sq:
+            min_dist_sq = dist_sq
+
+    return math.sqrt(min_dist_sq)
+
