@@ -12,7 +12,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.api.auth import Permission, require_permission
-from backend.api.serializers import MaskedRecordView, build_masked_record_view
+from backend.api.serializers import (
+    MaskedRecordView,
+    build_masked_record_view,
+    mask_edit_history_entry,
+)
 from backend.domain.access_control import Identity
 from backend.domain.provenance import (
     ExtractionNotFound,
@@ -142,11 +146,27 @@ def get_provenance(
 ) -> dict:
     """P4-02/T4.e — resolve a field back to document/page/bbox/engine/
     model/config identity, the recorded page-split/deskew transforms, and
-    the edit history that produced its current value."""
+    the edit history that produced its current value.
+
+    P4-10b fix: `edit_history` entries now go through
+    `mask_edit_history_entry` — a personal-data field's `predicted`/
+    `corrected` strings were previously returned verbatim here regardless
+    of role, bypassing masking entirely (this route built its own dict by
+    hand rather than going through the shared serializer). Found by
+    P4-10b's live route×role masking property test, which is exactly the
+    gap ADR-007 says a per-endpoint masking check can't reliably catch.
+    `raw_value` itself is deliberately never included in this response at
+    all (it never was) — the safest way to guarantee it never leaks here
+    is to not carry it across the API boundary in the first place.
+    """
     try:
         resolved = resolve_provenance(session, extraction_id)
     except ExtractionNotFound as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
+    role = _primary_role(identity)
+    masked_history = [
+        mask_edit_history_entry(h, field_class=resolved.field_name, role=role) for h in resolved.edit_history
+    ]
     return {
         "extraction_id": resolved.extraction_id,
         "document_id": resolved.document_id,
@@ -160,8 +180,8 @@ def get_provenance(
         "page_split_transform": resolved.page_split_transform,
         "deskew_transform": resolved.deskew_transform,
         "edit_history": [
-            {"actor": h.actor, "predicted": h.predicted, "corrected": h.corrected, "at": h.at}
-            for h in resolved.edit_history
+            {"actor": m.actor, "predicted": m.predicted, "corrected": m.corrected, "at": m.at, "masked": m.masked}
+            for m in masked_history
         ],
     }
 

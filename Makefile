@@ -68,8 +68,8 @@ test-contract: ## Cross-service contract tests + each service's own (needs a mig
 test-invariant: ## The four §5 invariants — proves the violating write fails, against a real DB.
 	TEST_DATABASE_URL="$(TEST_DATABASE_URL)" python -m pytest tests/invariant -v
 
-test-property:
-	python -m pytest tests/property -v
+test-property: ## P4-10b's live route×role masking sweep needs a migrated Postgres; the rest of tests/property doesn't.
+	TEST_DATABASE_URL="$(TEST_DATABASE_URL)" python -m pytest tests/property -v
 
 test-e2e: ## The fake end-to-end pipeline run (Phase 1 gate) — real Postgres + real Redis.
 	TEST_DATABASE_URL="$(TEST_DATABASE_URL)" python -m pytest tests/e2e -v
