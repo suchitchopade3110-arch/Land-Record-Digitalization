@@ -148,14 +148,42 @@ class MockSession:
         pass
 
     def execute(self, query: Any) -> Any:
+        extractions = list(self.extractions.values())
+
+        class _Scalars:
+            def __init__(self, values: list[Any]) -> None:
+                self._values = values
+
+            def all(self) -> list[Any]:
+                return self._values
+
         class _Result:
-            def __init__(self, alerts: list[Any]) -> None:
+            def __init__(self, alerts: list[Any], extractions: list[Any]) -> None:
                 self._alerts = alerts
+                self._extractions = extractions
 
             def scalar_one_or_none(self) -> Any:
+                # P4-03/P5-06: the two shapes `backend.domain.decision`
+                # queries against a session — the OperationalAlert dedup
+                # lookup (`_outside_calibrated_regime`) and
+                # `page_lifecycle._already_processed`'s "does a
+                # page.processed AuditEntry already exist" check, which
+                # this fake has no audit_entry table to answer at all, so
+                # always says "not yet recorded" (None) rather than
+                # pretending to model the audit log.
                 return self._alerts[-1] if self._alerts else None
 
-        return _Result(self.alerts)
+            def scalars(self) -> _Scalars:
+                # `page_lifecycle.mark_processed_if_terminal`'s "every
+                # sibling Extraction's routing_outcome" query — this fake
+                # has one page's worth of extractions in `self.extractions`
+                # at a time (every test here sets up a single page), so
+                # returning all tracked extractions' routing_outcome
+                # values is exactly what a real `WHERE page_id = ...`
+                # query would return for these tests' scenarios.
+                return _Scalars([e.routing_outcome for e in self._extractions])
+
+        return _Result(self.alerts, extractions)
 
 
 class TestExtractionEntity:

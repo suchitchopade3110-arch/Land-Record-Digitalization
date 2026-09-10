@@ -8,8 +8,9 @@ calibrated_confidence and routing_outcome, and publishes to DECISION_QUEUE via D
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any
 
 from modelwork.domain.calibration.calibrator import (
     CalibrationRegime,
@@ -29,7 +30,6 @@ from modelwork.domain.calibration.novelty import (
     NoveltyFeatures,
     NoveltyPolicy,
     NoveltyResult,
-    validate_work_envelope_novelty,
 )
 from modelwork.publishers import decision_publisher
 

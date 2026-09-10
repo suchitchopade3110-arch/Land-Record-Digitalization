@@ -8,8 +8,9 @@ Gates the calibrated regime: high novelty or out-of-distribution inputs route to
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Protocol
+from typing import Any, Protocol
 
 from modelwork.domain.stratum import stratum_key
 
@@ -171,17 +172,16 @@ class CentroidDistanceNoveltyModel:
         # 1. Stratum familiarity check
         stratum_is_known = stratum in self.prototypes if self.prototypes else False
 
-        if self.prototypes and not stratum_is_known:
-            if active_policy.reject_unseen_strata:
-                cluster_key = self._generate_cluster_id(features, stratum)
-                return NoveltyResult(
-                    novelty_score=1.0,
-                    is_outside_regime=True,
-                    regime_reason="unseen_stratum",
-                    cluster_id=cluster_key,
-                    model_version=self.model_version,
-                    config_version=self.config_version,
-                )
+        if self.prototypes and not stratum_is_known and active_policy.reject_unseen_strata:
+            cluster_key = self._generate_cluster_id(features, stratum)
+            return NoveltyResult(
+                novelty_score=1.0,
+                is_outside_regime=True,
+                regime_reason="unseen_stratum",
+                cluster_id=cluster_key,
+                model_version=self.model_version,
+                config_version=self.config_version,
+            )
 
         # 2. Representation embedding distance evaluation
         if features.embedding is not None and stratum_is_known:

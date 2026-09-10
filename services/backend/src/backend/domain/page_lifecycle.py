@@ -31,8 +31,7 @@ before appending a new one — the append-only audit log has no separate
 """
 from __future__ import annotations
 
-from landaudit import shard_for, shard_key_for
-from landaudit.models import AuditEntry
+from landaudit import AuditEntry, shard_for, shard_key_for
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 

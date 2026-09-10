@@ -9,11 +9,12 @@ Derives auto-accept thresholds from configured target field error (FR-CNF-03).
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Protocol
+from typing import Any, Protocol
 
-from modelwork.domain.learning_loop.guard import LeakageDetected, assert_no_leakage
+from modelwork.domain.learning_loop.guard import assert_no_leakage
 from modelwork.domain.stratum import stratum_key
 
 # Provisional implementation default for ECE binning.
