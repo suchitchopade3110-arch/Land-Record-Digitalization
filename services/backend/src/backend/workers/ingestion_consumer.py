@@ -22,8 +22,9 @@ from observability import traced_consumer
 from observability.envelope import emit
 from sqlalchemy.orm import Session
 
+from backend.domain.audit_log import record_page_ingested
 from backend.domain.page_split import split_stream
-from backend.models.entities import Page, SourceDocument
+from backend.models.entities import Batch, Page, SourceDocument
 
 
 def _materialize_seekable(store: ObjectStorePort, key: str, *, max_size_in_memory: int = 10 * 1024 * 1024) -> IO[bytes]:
@@ -57,6 +58,16 @@ def handle(message: dict, session: Session, *, store: ObjectStorePort | None = N
     if already_split:
         return {"document_id": document_id, "pages_created": 0, "already_split": True}
 
+    # P5-06/FR-ANL-01 — resolved once per document (not per page) so the
+    # dashboard's "pages ingested, by district" figure has something to
+    # group by; a page-level audit entry is the natural place, since a
+    # Page row genuinely appears here and nowhere earlier in the pipeline.
+    doc_for_district = session.get(SourceDocument, document_id)
+    batch_for_district = (
+        session.get(Batch, doc_for_district.batch_id) if doc_for_district is not None else None
+    )
+    district = batch_for_district.district if batch_for_district is not None else None
+
     store = store or get_store()
     spooled = _materialize_seekable(store, storage_key)
     try:
@@ -66,6 +77,7 @@ def handle(message: dict, session: Session, *, store: ObjectStorePort | None = N
             page = Page(document_id=document_id, index=split_page.index, storage_uri=page_put.key)
             session.add(page)
             session.flush()  # assigns page.id
+            record_page_ingested(session, page_id=page.id, district=district)
 
             trace_id = f"{document_id}:{page.id}"
             envelope_msg = emit(

@@ -47,6 +47,32 @@ def shard_key_for_record(*, district: str | None = None, batch_id: str | None = 
     return shard_key_for(district=district, batch_id=batch_id)
 
 
+def record_page_ingested(session: Session, *, page_id: str, district: str | None = None) -> None:
+    """P5-06/FR-ANL-01/FR-ING-03 — one entry per `Page` row created
+    (`backend.workers.ingestion_consumer.handle`), the page-granular
+    "ingested" event `backend.domain.dashboard`'s figure counts."""
+    chain_append(
+        session, actor="system:ingest", action="page.ingested", subject=page_id,
+        shard_key=shard_key_for_record(district=district) if district else None, district=district,
+    )
+
+
+def record_page_processed(session: Session, *, page_id: str, district: str | None = None) -> None:
+    """P5-06/FR-ANL-01 — fired once triage routing completes for a page
+    (`backend.domain.triage.route_page`). Assumption, stated plainly
+    rather than silently picked: the PRD's exact definition of "processed"
+    for FR-ANL-01 is not available in this session (the PRD is supplied
+    out of band — CLAUDE.md), so "processed" is defined here as "left the
+    acquisition band with a pinned envelope and a routing decision," the
+    nearest unambiguous pipeline milestone this backend already owns.
+    Confirm against the PRD's own FR-ANL-01 wording before treating this
+    figure as final."""
+    chain_append(
+        session, actor="system:triage", action="page.processed", subject=page_id,
+        shard_key=shard_key_for_record(district=district) if district else None, district=district,
+    )
+
+
 def record_permission_check(session: Session, *, actor: str, permission: str, allowed: bool) -> None:
     """FR-SEC-01 -- every RBAC decision, not just denials, is audited. No
     natural district for an access-control decision -- reserved system
@@ -84,12 +110,17 @@ def record_unmasked_read(
 def record_publish(
     session: Session, *, actor: str, record_id: str, version: int, district: str | None = None,
 ) -> None:
+    """P5-06: `district` is now stored as plain queryable metadata
+    (`AuditEntry.district`) too, not just hashed into a shard key — this
+    is one of the sources `backend.domain.dashboard`'s "pages published,
+    by district" figure (FR-ANL-01) reads."""
     chain_append(
         session,
         actor=actor,
         action="record.published",
         subject=f"{record_id}:{version}",
         shard_key=shard_key_for_record(district=district) if district else None,
+        district=district,
     )
 
 
