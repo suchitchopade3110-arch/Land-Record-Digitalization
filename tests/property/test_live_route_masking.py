@@ -162,29 +162,40 @@ def engine():
     return eng
 
 
-@pytest.fixture(scope="module", autouse=True)
-def _database_url_env(engine):
-    """`backend.api.auth.require_permission` opens its own DB session via
-    `session_factory()` (reading `DATABASE_URL` fresh) rather than through
-    an overridable `Depends()` — see P5-02b's phase report for this gap,
-    first hit there. Aligning `DATABASE_URL` with the test engine for this
-    whole module is simpler than re-deriving the workaround per fixture,
-    since nearly every route in this sweep is permission-gated."""
-    prior = os.environ.get("DATABASE_URL")
-    os.environ["DATABASE_URL"] = TEST_DB_URL
-    yield
-    if prior is None:
-        os.environ.pop("DATABASE_URL", None)
-    else:
-        os.environ["DATABASE_URL"] = prior
-
-
 @pytest.fixture(scope="module")
-def client():
+def client(engine):
+    """Overrides the one shared `backend.api.deps.get_session` dependency
+    — covers every route's own session *and* `require_permission`'s audit
+    write (P4-09b), since nearly every route in this sweep is permission-
+    gated.
+
+    `GET /closed-sets/{type}` doesn't go through that dependency at all,
+    though — `backend.config.config_client` is a process-wide singleton
+    by design (one cache, not per-request), so its own DB access is
+    redirected via `set_engine_override` instead (that module's docstring
+    explains why this is architecturally different from the
+    `Depends(get_session)` case rather than the same gap twice).
+
+    No `DATABASE_URL` alignment needed any more for either — this fixture
+    used to set it directly for the whole module; see git history / the
+    P4-09b phase report for the gap that closed.
+    """
+    from backend import config as backend_config
+    from backend.api import deps
     from starlette.testclient import TestClient
 
-    with TestClient(app) as c:
-        yield c
+    def _override_get_session():
+        with Session(engine) as s:
+            yield s
+
+    app.dependency_overrides[deps.get_session] = _override_get_session
+    backend_config.set_engine_override(engine)
+    try:
+        with TestClient(app) as c:
+            yield c
+    finally:
+        app.dependency_overrides.pop(deps.get_session, None)
+        backend_config.set_engine_override(None)
 
 
 @pytest.fixture(scope="module")

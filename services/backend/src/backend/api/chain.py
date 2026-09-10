@@ -19,17 +19,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.api.auth import Permission, require_permission
+from backend.api.deps import get_session
 from backend.domain.access_control import Identity
-from backend.models.base import session_factory
 
 router = APIRouter(tags=["chain"])
 _require_chain_verify = require_permission(Permission.CHAIN_VERIFY)
-
-
-def get_session():
-    factory = session_factory()
-    with factory() as session:
-        yield session
 
 
 @router.get("/chain/verify", response_model=dict)

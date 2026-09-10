@@ -13,6 +13,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
+from backend.api.deps import get_session
 from backend.domain.ingest import (
     MissingMandatoryBatchField,
     UnsupportedMediaType,
@@ -22,15 +23,8 @@ from backend.domain.ingest import (
     validate_mime,
 )
 from backend.domain.unit_table import NoUnitTableForDistrict, unit_table_for_district
-from backend.models.base import session_factory
 
 router = APIRouter(tags=["documents"])
-
-
-def get_session():
-    factory = session_factory()
-    with factory() as session:
-        yield session
 
 
 @router.post("/documents", status_code=202)

@@ -14,11 +14,21 @@ identity provider's `resolve()` input as-is — this is
 `MockIdentityProvider`'s whole posture (see that class's docstring), not
 a real bearer-token/session mechanism. Swapping `_identity_provider` for a
 real `IdentityProvider` is the entire P1 migration; no route changes.
+
+P4-09b: the permission-check audit write goes through the shared
+`backend.api.deps.get_session` dependency, not a private
+`session_factory()` call — see that module's docstring for why. FastAPI
+caches a dependency's result per request, so a route declaring its own
+`session: Session = Depends(get_session)` shares this exact session; a
+test overriding `get_session` therefore overrides the permission check's
+session too, with no separate `DATABASE_URL` alignment needed.
 """
 from __future__ import annotations
 
 from fastapi import Depends, Header, HTTPException
+from sqlalchemy.orm import Session
 
+from backend.api.deps import get_session
 from backend.domain.access_control import (
     Identity,
     IdentityProvider,
@@ -57,15 +67,19 @@ def require_permission(permission: Permission):
     not just successes.
     """
 
-    def _dependency(identity: Identity = Depends(get_identity)) -> Identity:
+    def _dependency(
+        identity: Identity = Depends(get_identity), session: Session = Depends(get_session),
+    ) -> Identity:
         from backend.domain.audit_log import record_permission_check
-        from backend.models.base import session_factory
 
         allowed = identity.has(permission)
-        factory = session_factory()
-        with factory() as session:
-            record_permission_check(session, actor=identity.actor, permission=permission.value, allowed=allowed)
-            session.commit()
+        # Committed here, independently of whatever the route does
+        # afterward with this same (shared, per-request) session — a
+        # denial raises immediately below and the route body never runs
+        # at all, so this check's own audit entry must be durable on its
+        # own rather than riding on a commit that may never happen.
+        record_permission_check(session, actor=identity.actor, permission=permission.value, allowed=allowed)
+        session.commit()
         if not allowed:
             raise HTTPException(
                 status_code=403,

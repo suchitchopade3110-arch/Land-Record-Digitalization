@@ -64,25 +64,13 @@ def session(engine):
 
 @pytest.fixture
 def client(engine):
-    """A TestClient wired to `engine` instead of `DATABASE_URL` — the
-    route's own `get_session` dependency is overridden per-request so
-    every write the client makes lands in (and is inspectable via) this
-    test's own Postgres.
-
-    `backend.api.auth.require_permission`'s dependency does not accept an
-    overridable session, though — it opens its own via
-    `backend.models.base.session_factory()` internally (to audit the
-    permission check) rather than through a `Depends(...)`-injected one.
-    Finding, not a guess: this is the first test in the repo to drive a
-    permission-gated route through a live `TestClient` at all — every
-    prior P4 route test called the domain layer directly. `DATABASE_URL`
-    is set to `TEST_DB_URL` for the fixture's lifetime so that internal
-    session also lands in the test database rather than the process
-    default (`.../landrecords`, which doesn't exist in CI). This is a
-    test-harness accommodation, not a production change — see the P5-02b
-    phase report for the underlying gap this papers over.
-    """
-    from backend.api import config_service as config_service_api
+    """A TestClient wired to `engine` instead of `DATABASE_URL` — overrides
+    the one shared `backend.api.deps.get_session` dependency, which now
+    covers every route's own session *and* `require_permission`'s audit
+    write (P4-09b) — no `DATABASE_URL` alignment needed any more (this
+    fixture used to set it directly; see git history / the P4-09b phase
+    report for the gap that closed)."""
+    from backend.api import deps
     from backend.main import app
     from starlette.testclient import TestClient
 
@@ -90,18 +78,12 @@ def client(engine):
         with Session(engine) as s:
             yield s
 
-    app.dependency_overrides[config_service_api.get_session] = _override_get_session
-    prior_database_url = os.environ.get("DATABASE_URL")
-    os.environ["DATABASE_URL"] = TEST_DB_URL
+    app.dependency_overrides[deps.get_session] = _override_get_session
     try:
         with TestClient(app) as c:
             yield c
     finally:
-        app.dependency_overrides.pop(config_service_api.get_session, None)
-        if prior_database_url is None:
-            os.environ.pop("DATABASE_URL", None)
-        else:
-            os.environ["DATABASE_URL"] = prior_database_url
+        app.dependency_overrides.pop(deps.get_session, None)
 
 
 def _unique_key(label: str) -> str:

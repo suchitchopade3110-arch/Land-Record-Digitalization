@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.api.auth import Permission, require_permission
+from backend.api.deps import get_session
 from backend.api.serializers import (
     MaskedRecordView,
     build_masked_record_view,
@@ -33,7 +34,6 @@ from backend.domain.unmasked_read import (
     UnmaskedField,
     read_unmasked_field,
 )
-from backend.models.base import session_factory
 from backend.models.entities import Extraction, Page, Record
 
 router = APIRouter(tags=["records"])
@@ -47,12 +47,6 @@ _require_publish = require_permission(Permission.RECORD_PUBLISH)
 _require_read_masked = require_permission(Permission.RECORD_READ_MASKED)
 _require_provenance_read = require_permission(Permission.PROVENANCE_READ)
 _require_read_unmasked = require_permission(Permission.RECORD_READ_UNMASKED)
-
-
-def get_session():
-    factory = session_factory()
-    with factory() as session:
-        yield session
 
 
 def _reasons_payload(reasons: tuple[BlockReason, ...]) -> list[dict]:

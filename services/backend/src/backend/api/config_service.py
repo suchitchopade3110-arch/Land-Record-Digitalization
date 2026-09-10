@@ -31,6 +31,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from backend.api.auth import Permission, require_permission
+from backend.api.deps import get_session
 from backend.domain.access_control import Identity
 from backend.domain.config_versions import (
     AuthorEqualsApprover,
@@ -40,17 +41,10 @@ from backend.domain.config_versions import (
     get_pinned_config,
     write_config_version,
 )
-from backend.models.base import session_factory
 
 router = APIRouter(tags=["config"])
 
 _require_config_write = require_permission(Permission.CONFIG_WRITE)
-
-
-def get_session():
-    factory = session_factory()
-    with factory() as session:
-        yield session
 
 
 @router.get("/config/{scope}/{key}")

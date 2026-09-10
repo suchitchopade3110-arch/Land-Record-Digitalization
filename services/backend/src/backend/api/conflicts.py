@@ -8,20 +8,14 @@ from __future__ import annotations
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from backend.api.deps import get_session
 from backend.api.serializers import ConflictPublicView, conflict_to_public_view
 from backend.domain.conflict_register import InvalidConflictTransition, list_conflicts
 from backend.domain.conflict_register import assign as assign_conflict
 from backend.domain.conflict_register import transition as transition_conflict
-from backend.models.base import session_factory
 from backend.models.entities import Conflict
 
 router = APIRouter(tags=["conflicts"])
-
-
-def get_session():
-    factory = session_factory()
-    with factory() as session:
-        yield session
 
 
 @router.get("/conflicts", response_model=list[ConflictPublicView])
