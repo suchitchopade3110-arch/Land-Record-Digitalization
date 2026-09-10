@@ -2,8 +2,16 @@
 
 from .baidu_unlimited import BaiduUnlimitedOCRAdapter
 from .field_extractor import extract_fields_for_doctype
-from .hwr_adapter import HWRAdapter
-from .interfaces import BoundingBox, OCREngineAdapter, OCRResult, OCRToken
+from .hwr_adapter import HWRAdapter, WriterAwareHWRRegistry
+from .interfaces import (
+    BoundingBox,
+    HWREngineAdapter,
+    HWRError,
+    HWRNotImplementedError,
+    OCREngineAdapter,
+    OCRResult,
+    OCRToken,
+)
 from .normalization import get_unconstrained_value, normalize_text
 from .pipeline import process_page_text, process_page_text_with_relationships
 from .region_router import LogicalRegion, LogicalRoute, PageRoutingPlan, RegionDispatcher, RegionRouter
@@ -14,6 +22,9 @@ __all__ = [
     "BaiduUnlimitedOCRAdapter",
     "BoundingBox",
     "HWRAdapter",
+    "HWREngineAdapter",
+    "HWRError",
+    "HWRNotImplementedError",
     "LogicalRegion",
     "LogicalRoute",
     "OCREngineAdapter",
@@ -26,6 +37,7 @@ __all__ = [
     "RuledTableExtractor",
     "TableCell",
     "TableStructure",
+    "WriterAwareHWRRegistry",
     "extract_fields_for_doctype",
     "extract_relationships",
     "extract_table_cells",

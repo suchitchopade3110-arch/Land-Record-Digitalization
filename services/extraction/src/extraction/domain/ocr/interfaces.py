@@ -21,6 +21,14 @@ class OCRResponseParseError(OCRError):
     """Raised when the raw engine output cannot be parsed into a normalized result."""
 
 
+class HWRError(OCRError):
+    """Base exception for Handwriting Recognition (HWR) operations."""
+
+
+class HWRNotImplementedError(HWRError):
+    """Raised when an HWR engine or per-writer model is unavailable/unimplemented."""
+
+
 @dataclass(frozen=True)
 class BoundingBox:
     x: float
@@ -94,3 +102,35 @@ class OCREngineAdapter(ABC):
         config_version: str = "v1",
     ) -> OCRResult:
         """Process image bytes and return normalized OCRResult with tokens and bounding boxes."""
+
+
+class HWREngineAdapter(OCREngineAdapter, ABC):
+    """Abstract adapter interface for Handwriting Recognition (HWR) engines.
+
+    Accepts specific region bounding boxes and supports per-writer cluster routing.
+    """
+
+    @abstractmethod
+    def process_region(
+        self,
+        image_bytes: bytes,
+        page_id: str,
+        region_bbox: BoundingBox,
+        writer_cluster_id: str | None = None,
+        config_version: str = "v1",
+    ) -> OCRResult:
+        """Process a specific region bounding box for handwriting recognition."""
+
+    def process_image(
+        self,
+        image_bytes: bytes,
+        page_id: str,
+        config_version: str = "v1",
+    ) -> OCRResult:
+        """Default fallback mapping full image to process_region with full-page bounding box."""
+        return self.process_region(
+            image_bytes=image_bytes,
+            page_id=page_id,
+            region_bbox=BoundingBox(x=0.0, y=0.0, w=1000.0, h=1000.0),
+            config_version=config_version,
+        )
