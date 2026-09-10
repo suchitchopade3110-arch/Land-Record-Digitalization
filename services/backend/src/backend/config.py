@@ -1,43 +1,50 @@
 """Reads config from the Config Service (M13) at startup + on invalidation
-event — never polls only.
+event — never polls only (P5-04, contract §4.1).
 
-Wraps observability.ConfigClient (shared cache-by-config_version behavior)
-around this service's own Config Service implementation (it IS the owner —
-other services call it over HTTP; this module is the in-process read path
-used by backend's own workers, e.g. the triage router, which is one of
-the two callers CLAUDE.md invariant 3 / FR-CFG-02 allows to resolve
-"current" rather than reading a pinned envelope).
+This is backend's own in-process read path: the triage router and the
+impact-preview job (the two callers CLAUDE.md invariant 3 / FR-CFG-02
+allows to resolve "current" config) use it, and `api/closed_sets.py`
+reads its corpus-version pointer through it too (P5-05) — one cache, one
+invalidation path, for backend's own process, the same shape Shree's,
+Shruthi's and Tharun's services get from their own `landconfigclient`
+instances wrapping an HTTP `fetch` instead of this in-process one.
 
-P5-04's event-based cache invalidation (broker version-change events, with
-a timer only as backstop, fail loud if the event channel is unavailable at
-startup) is not implemented here yet — `observability.ConfigClient` only
-re-fetches on every call and diffs `config_version` client-side, which is
-correct but does not yet meet P5-04's "never poll as the sole mechanism"
-bar for a shared library. That's P5-04's own task, not a P5-01/03
-side effect.
+Supersedes the interim `observability.ConfigClient` this module used
+before P5-04 landed — that stub only diffed `config_version` on every
+call and never met §4.1's "never poll on a timer as the sole
+invalidation mechanism" bar. `observability.ConfigClient` is left as-is
+for the other three services still importing it directly; migrating them
+to `landconfigclient` is a follow-up for each of those owners, not done
+here.
 """
 from __future__ import annotations
 
-from observability import ConfigClient
+from landconfigclient import ConfigClient
 
 from backend.domain.config_versions import (
-    ConfigNotFound,
     as_response,
     get_effective_config,
+    get_pinned_config,
 )
 from backend.models.base import session_factory
 
 
-def _fetch_from_db(scope: str, key: str) -> dict:
-    """FR-CFG-01 — read the currently-effective `ConfigVersion` row for
-    (scope, key) from Postgres, in the exact §4.1 response shape
-    `ConfigClient` expects."""
+def _fetch_from_db(scope: str, key: str, config_version: str | None) -> dict:
+    """FR-CFG-01 — read the requested `ConfigVersion` row for (scope, key)
+    from Postgres, in the exact §4.1 response shape `ConfigClient`
+    expects. Pinned when `config_version` is given, "effective now"
+    otherwise — the same two forms `api/config_service.py`'s own HTTP
+    route exposes, called in-process here. `ConfigNotFound` propagates
+    unchanged — callers (e.g. `backend.domain.closed_sets`) catch it by
+    name rather than have it wrapped into something generic.
+    """
     factory = session_factory()
     with factory() as session:
-        try:
-            row = get_effective_config(session, scope, key)
-        except ConfigNotFound as exc:
-            raise KeyError(f"no effective config for scope={scope!r}, key={key!r}") from exc
+        row = (
+            get_pinned_config(session, scope, key, config_version)
+            if config_version is not None
+            else get_effective_config(session, scope, key)
+        )
         return as_response(row)
 
 

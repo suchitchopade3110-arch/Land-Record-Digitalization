@@ -8,12 +8,18 @@ preview) is out of scope for this module — see
 `infra/migrations/versions/0006_phase5_config_immutability.py`'s docstring
 for what P5-02 still needs and why it isn't guessed at here. Rows are
 written directly today (by whatever process runs the two-person approval
-today); this module only ever reads.
+today); this module only ever reads — except `build_version_change_event`
+/ `publish_version_change_event` below, which exist for P5-02's future
+write endpoint to call, not for anything in this module to call itself
+(see that function's own docstring for why it is unwired today).
 """
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Any
 
+from landconfigclient import QUEUE_NAME
+from landoutbox import write as outbox_write
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -84,3 +90,37 @@ def as_response(row: ConfigVersion) -> dict:
         "config_version": row.id,
         "effective_from": row.effective_from.isoformat(),
     }
+
+
+def build_version_change_event(row: ConfigVersion) -> dict[str, Any]:
+    """The invalidation payload `libs/config_client`'s
+    `ConfigClient.handle_version_change_event` expects
+    (`landconfigclient.subscriber.QUEUE_NAME`) — just enough for a
+    subscriber to know which `(scope, key)` to drop from its cache;
+    `config_version` rides along for logging only, since a client always
+    re-fetches "effective now" on its next read rather than trusting a
+    version id carried on the event (P5-04)."""
+    return {"scope": row.scope, "key": row.key, "config_version": row.id}
+
+
+def publish_version_change_event(session: Session, row: ConfigVersion) -> None:
+    """Enqueue the invalidation event for `row` via the transactional
+    outbox (ADR-005), in the same transaction as the `ConfigVersion`
+    INSERT — so "wrote the new version" and "queued the cache
+    invalidation" land together, the same guarantee every other
+    DB-write-plus-notify path in this repo gets.
+
+    Unwired today: P5-02's two-person write workflow (draft -> submitted
+    -> approved -> effective) doesn't exist yet as a callable endpoint —
+    see `infra/migrations/versions/0006_phase5_config_immutability.py`'s
+    docstring, which reports the same gap. `ConfigVersion` rows are
+    currently written directly (raw INSERT / test fixtures), not through
+    any function in this module, so there is no single call site to wire
+    this into without fabricating a write endpoint that P5-02 is meant to
+    design properly (the approval semantics, not just the INSERT). This
+    function is built and tested (`libs/config_client`'s P5-04 suite)
+    against a fake queue so P5-02's endpoint has a one-line call to make
+    once it exists: `publish_version_change_event(session, new_row)`
+    right after `session.add(new_row)`, before that transaction commits.
+    """
+    outbox_write(session, queue=QUEUE_NAME, envelope=build_version_change_event(row))

@@ -63,7 +63,7 @@ jobs:
         # every shared lib) — install everything up front rather than
         # per-service, since this job (unlike ci.yml) isn't matrixed.
         run: |
-          pip install -e libs/observability -e libs/queue -e libs/storage -e libs/outbox -e libs/envelope -e libs/masking -e libs/audit
+          pip install -e libs/observability -e libs/queue -e libs/storage -e libs/outbox -e libs/envelope -e libs/masking -e libs/audit -e libs/config_client
           for svc in backend extraction validation modelwork; do
             pip install -e "services/$svc"
           done
@@ -100,4 +100,4 @@ jobs:
         run: pytest libs/observability/tests -v
 
       - name: Run every other lib's own tests (isolated on landrecords_libtest)
-        run: pytest libs/queue/tests libs/storage/tests libs/masking/tests libs/envelope/tests libs/outbox/tests libs/audit/tests -v
+        run: pytest libs/queue/tests libs/storage/tests libs/masking/tests libs/envelope/tests libs/outbox/tests libs/audit/tests libs/config_client/tests -v

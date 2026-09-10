@@ -18,6 +18,7 @@ dependencies = [
   "landenvelope",
   "landmasking",
   "landaudit",
+  "landconfigclient",
   "pypdf>=4.0",   # FR-ING-03 — PDF page-tree splitting (structural, not OCR)
   "pillow>=10.0", # FR-ING-03/FR-TRI-06 — multi-frame TIFF splitting + off-the-shelf preprocessing ops
 ]

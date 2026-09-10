@@ -1,0 +1,16 @@
+[project]
+name = "landconfigclient"
+version = "0.1.0"
+description = "P5-04/FR-CFG-02 — shared Config Service client. Caches on (scope, key, config_version), invalidates on a broker event (never a timer alone), and refuses to resolve 'current' config inside a pinned WorkEnvelope scope."
+requires-python = ">=3.11"
+dependencies = ["landenvelope", "landqueue"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
