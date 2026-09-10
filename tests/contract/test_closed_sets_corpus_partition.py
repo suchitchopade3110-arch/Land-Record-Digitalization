@@ -2,12 +2,20 @@
 
 Same fixture convention as `services/backend/tests/contract/
 test_config_version_storage_and_read.py`: real Postgres via
-`TEST_DATABASE_URL`, skipped if 0007 isn't migrated yet.
+`TEST_DATABASE_URL`, skipped if 0008 isn't migrated yet.
+
+P5-05-fix: legitimate ('schema'/'lgd') rows below go through
+`backend.domain.closed_set_loaders` — the only sanctioned writers — not
+through `_mk_entry` directly. `_mk_entry` remains for the one case that
+doesn't need a loader ('lrms', never gated — see 0008's migration
+docstring) and for test 6, which deliberately bypasses the loaders to
+prove the trigger rejects a direct write.
 """
 import os
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from backend.domain.closed_set_loaders import load_lgd_derived_entries, load_schema_derived_entries
 from backend.domain.closed_sets import ClosedSetTypeNotFound, get_closed_set
 from backend.domain.config_versions import (
     as_response,
@@ -17,6 +25,7 @@ from backend.domain.config_versions import (
 from backend.models.entities import ClosedSetEntry, ConfigVersion
 from landconfigclient import ConfigClient
 from sqlalchemy import create_engine, text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 TEST_DB_URL = os.environ.get(
@@ -30,10 +39,12 @@ def engine():
     try:
         with eng.connect() as c:
             exists = c.execute(
-                text("SELECT 1 FROM pg_constraint WHERE conname = 'ck_closed_set_entry_provenance_enum'")
+                text(
+                    "SELECT 1 FROM pg_trigger WHERE tgname = 'closed_set_entry_enforce_loader_provenance'"
+                )
             ).scalar()
             if not exists:
-                pytest.skip(f"{TEST_DB_URL} has no Phase 5 (0007) migrated schema — run migrations first")
+                pytest.skip(f"{TEST_DB_URL} has no Phase 5 (0008) migrated schema — run migrations first")
     except Exception:
         pytest.skip(f"{TEST_DB_URL} has no migrated schema — run migrations first")
     return eng
@@ -96,11 +107,8 @@ def test_schema_derived_set_returned_with_source_and_config_version(session, con
     session.flush()
     version_id = pointer.id
 
-    session.add_all(
-        [
-            _mk_entry(type_="land_use_category", config_version=version_id, code="AGRI", provenance="schema"),
-            _mk_entry(type_="land_use_category", config_version=version_id, code="RESI", provenance="schema"),
-        ]
+    load_schema_derived_entries(
+        session, type_="land_use_category", config_version=version_id, codes=["AGRI", "RESI"]
     )
     session.commit()
 
@@ -121,17 +129,9 @@ def test_lgd_derived_set_returned_with_source_lgd(session, config_client_for):
     session.flush()
     version_id = pointer.id
 
-    session.add_all(
-        [
-            _mk_entry(
-                type_="village_name", config_version=version_id, code="V001",
-                provenance="lgd", district="sitapur",
-            ),
-            _mk_entry(
-                type_="village_name", config_version=version_id, code="V002",
-                provenance="lgd", district="sitapur",
-            ),
-        ]
+    load_lgd_derived_entries(
+        session, type_="village_name", config_version=version_id,
+        codes=["V001", "V002"], district="sitapur",
     )
     session.commit()
 
@@ -153,17 +153,18 @@ def test_lrms_row_mislabelled_as_schema_source_is_still_excluded(session, config
     session.flush()
     version_id = pointer.id
 
-    session.add_all(
-        [
-            _mk_entry(type_="tenure_type", config_version=version_id, code="BHUMIDHAR", provenance="schema"),
-            _mk_entry(type_="tenure_type", config_version=version_id, code="SIRDAR", provenance="schema"),
-            # The attack T5.c exists for: source claims "schema", the
-            # ground-truth provenance column says "lrms".
-            _mk_entry(
-                type_="tenure_type", config_version=version_id, code="LRMS_LEAKED_CODE",
-                provenance="lrms", source="schema",
-            ),
-        ]
+    load_schema_derived_entries(
+        session, type_="tenure_type", config_version=version_id, codes=["BHUMIDHAR", "SIRDAR"]
+    )
+    # The attack T5.c exists for: source claims "schema", the ground-truth
+    # provenance column says "lrms". 'lrms' is never loader-gated (0008's
+    # migration docstring) — a direct construction is legitimate here,
+    # standing in for e.g. a legacy import that tagged this row lrms.
+    session.add(
+        _mk_entry(
+            type_="tenure_type", config_version=version_id, code="LRMS_LEAKED_CODE",
+            provenance="lrms", source="schema",
+        )
     )
     session.commit()
 
@@ -204,7 +205,7 @@ def test_consumes_config_client_cache_and_reflects_version_bump(session, config_
     session.add(pointer_v1)
     session.flush()
     v1_id = pointer_v1.id
-    session.add(_mk_entry(type_="season_code", config_version=v1_id, code="KHARIF", provenance="schema"))
+    load_schema_derived_entries(session, type_="season_code", config_version=v1_id, codes=["KHARIF"])
     session.commit()
 
     first = get_closed_set(session, config_client_for, "season_code", None)
@@ -221,7 +222,7 @@ def test_consumes_config_client_cache_and_reflects_version_bump(session, config_
     session.add(pointer_v2)
     session.flush()
     v2_id = pointer_v2.id
-    session.add(_mk_entry(type_="season_code", config_version=v2_id, code="RABI", provenance="schema"))
+    load_schema_derived_entries(session, type_="season_code", config_version=v2_id, codes=["RABI"])
     session.commit()
 
     # Still cached until the invalidation event arrives.
@@ -235,3 +236,60 @@ def test_consumes_config_client_cache_and_reflects_version_bump(session, config_
     assert third["config_version"] == v2_id
     assert third["codes"] == ["RABI"]
     assert len(fetch_calls) == 2
+
+
+# ---------------------------------------------------------------------------
+# 6. P5-05-fix — a caller that is NOT the schema loader attempts to insert
+#    provenance='schema' directly. Rejected at the write, not filtered at
+#    the read.
+# ---------------------------------------------------------------------------
+
+
+def test_direct_insert_of_schema_provenance_outside_the_loader_is_rejected_at_write(session):
+    pointer = _mk_config_version("global", "closed_set.forged_provenance_test")
+    session.add(pointer)
+    session.flush()
+    version_id = pointer.id
+
+    # Bypasses backend.domain.closed_set_loaders entirely — exactly the
+    # thing T5.c's original test 3 proved the *read* path tolerates
+    # (mislabelled .source). This proves the *write* path no longer
+    # tolerates it for .provenance: no SET LOCAL app.closed_set_loader_provenance
+    # has been issued in this transaction, so 0008's trigger must refuse
+    # the INSERT outright — not silently accept it and rely on the read
+    # side to filter it back out later.
+    session.add(
+        ClosedSetEntry(
+            type="forged_provenance_test",
+            district=None,
+            code="FORGED",
+            source="schema",
+            provenance="schema",
+            config_version=version_id,
+        )
+    )
+    with pytest.raises(DBAPIError, match="must be written by its own sanctioned loader"):
+        session.flush()
+    session.rollback()
+
+
+def test_lgd_loader_cannot_be_used_to_write_schema_provenance(session):
+    """The loaders are hardcoded, not parameterized by provenance — proved
+    here by confirming the LGD loader's own GUC (`'lgd'`) does not
+    satisfy the trigger for a hand-constructed `'schema'` row added in the
+    same transaction."""
+    pointer = _mk_config_version("global", "closed_set.cross_loader_test")
+    session.add(pointer)
+    session.flush()
+    version_id = pointer.id
+
+    load_lgd_derived_entries(session, type_="cross_loader_test", config_version=version_id, codes=["V1"])
+    session.add(
+        ClosedSetEntry(
+            type="cross_loader_test", district=None, code="FORGED",
+            source="schema", provenance="schema", config_version=version_id,
+        )
+    )
+    with pytest.raises(DBAPIError, match="must be written by its own sanctioned loader"):
+        session.flush()
+    session.rollback()

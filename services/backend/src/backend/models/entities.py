@@ -462,6 +462,14 @@ class ClosedSetEntry(Base):
     `ConfigVersion` id plus a fresh batch of entries, never an UPDATE of
     an existing entry (same "new version, never overwrite" shape as every
     other config-is-data table in this file).
+
+    P5-05-fix: a `'schema'`- or `'lgd'`-provenance row can only be
+    inserted by the matching sanctioned loader in
+    `backend.domain.closed_set_loaders` — a DB trigger
+    (`infra/migrations/versions/
+    0008_closed_set_entry_loader_provenance.py`) rejects the INSERT
+    otherwise. Do not construct this class directly for those two
+    provenances outside that module; the trigger will refuse the write.
     """
 
     __tablename__ = "closed_set_entry"
