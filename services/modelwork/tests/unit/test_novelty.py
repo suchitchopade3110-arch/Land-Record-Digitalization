@@ -126,8 +126,22 @@ from modelwork.domain.calibration.novelty import (
 )
 from modelwork.domain.stratum import stratum_key
 
-from backend.domain.decision import route
-from backend.models.entities import Extraction, OperationalAlert, ReviewTask
+# Test I is the one cross-service check in this otherwise backend-free unit
+# file (everything else here runs against modelwork alone, with sqlalchemy/
+# landaudit/pydantic shimmed above so a real DB/broker is never needed). CI's
+# per-service `lint-and-unit-test (modelwork)` job installs only modelwork +
+# shared libs (.github/workflows/ci.yml) — `backend` is never on the path
+# there, unlike a full local `make test` or the separate `contract-tests` job,
+# which is where this exact boundary is already covered end-to-end by
+# `services/modelwork/tests/contract/test_modelwork_to_backend_boundary.py`.
+# Import lazily and skip Test I (only) when `backend` isn't installed, rather
+# than letting a ModuleNotFoundError abort collection for tests A-H too.
+try:
+    from backend.domain.decision import route
+    from backend.models.entities import Extraction, OperationalAlert, ReviewTask
+    _BACKEND_AVAILABLE = True
+except ImportError:
+    _BACKEND_AVAILABLE = False
 
 
 def _sample_work_envelope(
@@ -508,6 +522,7 @@ def test_h_decision_flow_integration_novelty_gating():
     assert pub_env_in.get("novelty_cluster_id") is None
 
 
+@pytest.mark.skipif(not _BACKEND_AVAILABLE, reason="backend not installed in this test environment")
 def test_i_backend_decision_and_cluster_deduplication():
     """DecisionEnvelope with outside_calibrated_regime routes to OperationalAlert and deduplicates clusters."""
     session = _MockSession()
