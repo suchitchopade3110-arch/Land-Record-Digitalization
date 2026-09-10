@@ -15,7 +15,11 @@ import uuid
 from datetime import datetime, timezone
 
 import pytest
-from backend.domain.dashboard import get_page_activity
+from backend.domain.dashboard import PAGE_ACTIVITY_UNITS, get_page_activity
+from backend.domain.decision import route
+from backend.domain.page_lifecycle import mark_processed_if_terminal
+from backend.domain.triage import route_page
+from backend.models.entities import Batch, Extraction, Page, SourceDocument
 from landaudit.chain import shard_for, shard_key_for
 from landaudit.models import AuditEntry
 from sqlalchemy import create_engine, func, select, text
@@ -99,7 +103,7 @@ def test_figures_equal_independent_direct_queries_and_move_when_seeded_further(s
     assert rows["2026-03-01"]["pages_processed"] == _direct_count(
         session, action="page.processed", district=district, day=day1.date()
     ) == 1
-    assert rows["2026-03-01"]["pages_published"] == _direct_count(
+    assert rows["2026-03-01"]["records_published"] == _direct_count(
         session, action="record.published", district=district, day=day1.date()
     ) == 1
     assert "2026-03-02" not in rows  # nothing seeded that day yet — absent, not zero
@@ -137,7 +141,7 @@ def test_implementation_does_not_drift_like_a_naive_second_source_would(session)
     before = {r["date"]: r for r in get_page_activity(session, district=district)}
     assert before["2026-04-01"]["pages_ingested"] == 1
     assert before["2026-04-01"]["pages_processed"] == 0
-    assert before["2026-04-01"]["pages_published"] == 0
+    assert before["2026-04-01"]["records_published"] == 0
 
     # Seed a divergent, unrelated audit_entry row for the SAME district and
     # day — a "count every row for this district/day" implementation
@@ -208,4 +212,121 @@ def test_response_shape_carries_no_per_record_fields_to_mask(session):
     rows = get_page_activity(session, district=district)
     assert rows
     for row in rows:
-        assert set(row.keys()) == {"district", "date", "pages_ingested", "pages_processed", "pages_published"}
+        assert set(row.keys()) == {"district", "date", "pages_ingested", "pages_processed", "records_published"}
+
+
+# ---------------------------------------------------------------------------
+# 6. P5-06-fix — "processed" means a terminal decision, not triage
+# routing. Exercised through the real domain functions (not seeded
+# AuditEntry rows) so this proves the actual call sites, not just the
+# aggregation query above them.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def a_page(session):
+    batch = Batch(district="sitapur")
+    session.add(batch)
+    session.flush()
+    doc = SourceDocument(batch_id=batch.id, sha256="d" * 64, storage_uri="x", mime="image/tiff", page_count=1)
+    session.add(doc)
+    session.flush()
+    page = Page(document_id=doc.id, index=0)
+    session.add(page)
+    session.flush()
+    return page
+
+
+def _extraction(session, page, routing_outcome=None):
+    e = Extraction(page_id=page.id, field_name="owner_name", raw_value="x", routing_outcome=routing_outcome)
+    session.add(e)
+    session.flush()
+    return e
+
+
+def _page_processed_count(session, page_id) -> int:
+    return session.query(AuditEntry).filter_by(action="page.processed", subject=page_id).count()
+
+
+def test_triaged_but_not_decided_page_does_not_count_as_processed(session, a_page):
+    # Triage runs (envelope pinned, queued) — this alone must never mark
+    # the page processed; see backend.domain.triage.route_page's
+    # docstring for why it no longer emits page.processed at all.
+    route_page(
+        session, document_id=a_page.document_id, page_id=a_page.id,
+        doc_type="jamabandi", page_role="text", config_version="v1",
+    )
+    _extraction(session, a_page, routing_outcome=None)  # extracted but not yet decided
+    session.commit()
+
+    assert _page_processed_count(session, a_page.id) == 0
+
+
+def test_page_with_one_of_two_fields_decided_is_not_processed(session, a_page):
+    e1 = _extraction(session, a_page, routing_outcome="auto_accept")
+    _extraction(session, a_page, routing_outcome=None)  # second field still mid-pipeline
+
+    route(session, e1.id)
+    session.commit()
+
+    assert _page_processed_count(session, a_page.id) == 0
+
+
+def test_page_processed_fires_once_last_field_reaches_terminal_outcome(session, a_page):
+    e1 = _extraction(session, a_page, routing_outcome="auto_accept")
+    e2 = _extraction(session, a_page, routing_outcome=None)  # not decided yet
+
+    route(session, e1.id)
+    assert _page_processed_count(session, a_page.id) == 0  # e2 still non-terminal
+
+    # e2's routing_outcome arrives later (M8's classifier decides it) —
+    # decision.route() only ever acts on an already-set outcome.
+    e2.routing_outcome = "review"
+    session.flush()
+    route(session, e2.id)
+    session.commit()
+
+    assert _page_processed_count(session, a_page.id) == 1
+
+
+def test_page_processed_replay_guard_fires_exactly_once(session, a_page):
+    e1 = _extraction(session, a_page, routing_outcome="auto_accept")
+    route(session, e1.id)
+    session.commit()
+    assert _page_processed_count(session, a_page.id) == 1
+
+    # A redelivered decision message for the same (already-terminal) field.
+    route(session, e1.id)
+    route(session, e1.id)
+    session.commit()
+
+    assert _page_processed_count(session, a_page.id) == 1
+
+
+def test_mark_processed_if_terminal_returns_whether_it_appended(session, a_page):
+    _extraction(session, a_page, routing_outcome="auto_accept")
+    session.flush()
+
+    assert mark_processed_if_terminal(session, a_page.id) is True
+    assert mark_processed_if_terminal(session, a_page.id) is False  # already recorded
+
+
+# ---------------------------------------------------------------------------
+# 7. P5-06-units — the response declares which unit each key counts,
+# explicitly, so `records_published` can't be silently misread as a page
+# count just because it sits next to two genuine page counts.
+# ---------------------------------------------------------------------------
+
+
+def test_units_mapping_matches_the_actual_response_keys(session):
+    district = f"units-test-{uuid.uuid4().hex[:8]}"
+    _seed(session, action="page.ingested", district=district, at=datetime(2026, 7, 1, tzinfo=timezone.utc))
+    session.commit()
+
+    rows = get_page_activity(session, district=district)
+    row_keys = set(rows[0].keys()) - {"district", "date"}
+
+    assert set(PAGE_ACTIVITY_UNITS.keys()) == row_keys
+    assert PAGE_ACTIVITY_UNITS["pages_ingested"] == "pages"
+    assert PAGE_ACTIVITY_UNITS["pages_processed"] == "pages"
+    assert PAGE_ACTIVITY_UNITS["records_published"] == "records"

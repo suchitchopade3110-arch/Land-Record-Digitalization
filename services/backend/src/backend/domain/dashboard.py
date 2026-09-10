@@ -28,15 +28,30 @@ Mapping decisions, stated plainly rather than guessed at silently (the
 PRD's own FR-ANL-01 wording is not available in this session — supplied
 out of band per CLAUDE.md):
   - "ingested" = `page.ingested` — exact, page-granular, unambiguous.
-  - "processed" = `page.processed` — an assumption ("left the acquisition
-    band with a pinned envelope and a routing decision"), not a term this
-    codebase had an existing unambiguous definition for. Confirm against
-    the PRD before treating this figure as final.
-  - "published" = `record.published` — a proxy. Publication happens at
-    `Record` granularity (FR-PUB-01), not per page; there is no
-    page-level publish event, so this counts published *records*, not
-    published *pages*, as the closest existing terminal-publication
-    signal.
+  - "processed" = `page.processed` (P5-06-fix, settled): every field on
+    the page has reached a terminal decision outcome (`backend.domain
+    .decision.VALID_ROUTING_OUTCOMES`) — `backend.domain.page_lifecycle
+    .mark_processed_if_terminal`, called from `decision.route()`. The
+    original P5-06 session fired this at triage-routing time instead
+    (flagged there as an unconfirmed assumption); that ran the figure
+    ahead of the real backlog, since triage only enqueues a page for
+    extraction. See `page_lifecycle`'s module docstring for the full
+    writeup and the replay guard.
+  - "published" (P5-06-units, settled) = `record.published`, reported as
+    `records_published` — deliberately NOT `pages_published`. Publication
+    happens at `Record` granularity (FR-PUB-01); FR-EXT-04 multi-page
+    record assembly collapses several pages into one record, so a page
+    count and a record count are not the same series, and a field named
+    `pages_published` sitting next to two genuine page counts
+    (`pages_ingested`/`pages_processed`) would read as "the same unit,
+    lagging" — a backlog that doesn't exist. Chose to relabel rather than
+    add a page-level publish event: that would mean a second, redundant
+    "this page's record published" audit action purely for counting,
+    alongside `record.published` (one row per `record_group_id:version`
+    publish) which already exists and already means something.
+    `get_dashboard_metrics` (api/dashboard.py) also returns a `units`
+    mapping alongside the rows, naming each key's unit explicitly, so a
+    caller can't rely on inferring it from the key name alone.
 
 Out of scope for P5-06 (separate task IDs, reported rather than built):
 P5-07's other panels (auto-accept rate with its confidence interval,
@@ -55,7 +70,18 @@ from sqlalchemy.orm import Session
 PAGE_ACTIVITY_ACTIONS: dict[str, str] = {
     "page.ingested": "pages_ingested",
     "page.processed": "pages_processed",
-    "record.published": "pages_published",
+    "record.published": "records_published",
+}
+
+# P5-06-units — the unit each `PAGE_ACTIVITY_ACTIONS` value counts in.
+# `get_dashboard_metrics` (api/dashboard.py) returns this alongside the
+# rows so a caller never has to infer it from a key name — see this
+# module's docstring ("published", settled) for why `records_published`
+# is a different unit from its two siblings, not just a different name.
+PAGE_ACTIVITY_UNITS: dict[str, str] = {
+    "pages_ingested": "pages",
+    "pages_processed": "pages",
+    "records_published": "records",
 }
 
 
@@ -111,7 +137,7 @@ def get_page_activity(
                 "date": day_str,
                 "pages_ingested": 0,
                 "pages_processed": 0,
-                "pages_published": 0,
+                "records_published": 0,
             },
         )
         bucket[PAGE_ACTIVITY_ACTIONS[action]] = count

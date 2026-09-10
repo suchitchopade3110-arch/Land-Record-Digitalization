@@ -27,7 +27,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from backend.api.deps import get_session
-from backend.domain.dashboard import get_page_activity
+from backend.domain.dashboard import PAGE_ACTIVITY_UNITS, get_page_activity
 
 router = APIRouter(tags=["dashboard"])
 
@@ -39,4 +39,12 @@ def get_dashboard_metrics(
     until: datetime | None = Query(None),
     session: Session = Depends(get_session),
 ) -> dict:
-    return {"page_activity": get_page_activity(session, district=district, since=since, until=until)}
+    # P5-06-units — `units` names what each `page_activity` row's counts
+    # actually count (pages vs records), explicitly, in the response
+    # itself — see `backend.domain.dashboard`'s docstring ("published",
+    # settled) for why `records_published` isn't just a differently-named
+    # page count.
+    return {
+        "page_activity": get_page_activity(session, district=district, since=since, until=until),
+        "units": PAGE_ACTIVITY_UNITS,
+    }

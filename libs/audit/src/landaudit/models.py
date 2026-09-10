@@ -55,6 +55,15 @@ class AuditEntry(AuditBase):
     # change to the audit chain's cryptographic guarantee that a
     # dashboard-aggregation task should not make as a side effect — see
     # `chain.append`'s docstring for the same note at the write site.
+    #
+    # P5-06 Block 4 (docs, stated explicitly): being outside the hash
+    # chain's material means this column is MUTABLE without breaking
+    # chain verification (a later correction to a row's `district` cannot
+    # be detected by `verify_shard` — nothing here is supposed to
+    # detect it, since nothing here carries the tamper-evidence
+    # guarantee) — it is a dashboard grouping dimension only, and must
+    # NEVER be used as evidence in a dispute or read on any FR-PUB-02
+    # provenance path. Those read `subject` (which does chain) instead.
     district: Mapped[str | None] = mapped_column(String, index=True)
 
 
