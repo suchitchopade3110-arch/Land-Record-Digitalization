@@ -43,6 +43,7 @@ except ImportError:  # pragma: no cover
     pytest = _MockPytest()  # type: ignore[assignment]
 
 from modelwork.domain.calibration.calibrator import (
+    DEFAULT_ECE_NUM_BINS,
     CalibrationRegime,
     CalibrationResult,
     CalibratorFeatureEncoder,
@@ -50,6 +51,7 @@ from modelwork.domain.calibration.calibrator import (
     CorrectionLabel,
     DeterministicCalibratorModel,
     ECEEvaluation,
+    FeatureEncodingPolicy,
     LogisticRegressionCalibrator,
     PerStratumCalibrator,
     ThresholdPolicy,
@@ -73,6 +75,7 @@ def _make_sample_label(
     print_or_hw: str = "handwritten",
     legibility: str = "medium",
     doc_type: str = "ror",
+    writer_cluster: str = "cluster_01",
 ) -> CorrectionLabel:
     features = CalibratorFeatures(
         token_confidence=token_conf,
@@ -84,7 +87,7 @@ def _make_sample_label(
         doc_type=doc_type,
         print_or_handwriting=print_or_hw,
         legibility_band=legibility,
-        writer_cluster_id="cluster_01",
+        writer_cluster_id=writer_cluster,
     )
     return CorrectionLabel(
         extraction_id=extraction_id,
@@ -115,7 +118,29 @@ def test_learned_model_trained_from_labeled_examples():
     assert isinstance(attributions, dict)
 
 
-# 2. identical training data produces deterministic behavior
+# 2. learned parameters change when training labels change
+def test_learned_parameters_change_when_labels_change():
+    """Different training labels produce distinct learned weights and posterior probabilities."""
+    base_feats = [
+        CalibratorFeatures(token_confidence=0.5 + i * 0.04, field_class="survey_number")
+        for i in range(10)
+    ]
+    labels_high = [(feat, True) for feat in base_feats]
+    labels_low = [(feat, False) for feat in base_feats]
+
+    m_high = LogisticRegressionCalibrator(learning_rate=0.5, iterations=100).fit(labels_high)
+    m_low = LogisticRegressionCalibrator(learning_rate=0.5, iterations=100).fit(labels_low)
+
+    # Bias and probabilities should reflect positive vs negative ground truth
+    assert m_high.bias > m_low.bias
+
+    test_feat = base_feats[5]
+    p_high, _ = m_high.predict_calibrated_confidence(test_feat)
+    p_low, _ = m_low.predict_calibrated_confidence(test_feat)
+    assert p_high > p_low
+
+
+# 3. identical training data produces deterministic behavior
 def test_identical_training_data_produces_deterministic_behavior():
     """Identical training data produces identical fitted parameters and predictions."""
     labels = [
@@ -135,7 +160,7 @@ def test_identical_training_data_produces_deterministic_behavior():
     assert a1 == a2
 
 
-# 3. calibrated probability is bounded in [0,1]
+# 4. calibrated probability is bounded in [0,1]
 def test_calibrated_probability_bounded():
     """Calibrated probability remains strictly bounded in [0.0, 1.0] across extreme inputs."""
     labels = [
@@ -154,7 +179,20 @@ def test_calibrated_probability_bounded():
     assert 0.0 <= p_low <= 1.0
 
 
-# 4. raw confidence remains distinct semantically from calibrated confidence
+# 5. invalid/non-finite inputs rejected explicitly
+def test_invalid_non_finite_inputs_rejected():
+    """CalibratorFeatures rejects NaN and infinite float values."""
+    with pytest.raises(ValueError):
+        CalibratorFeatures(token_confidence=float("nan"))
+
+    with pytest.raises(ValueError):
+        CalibratorFeatures(token_confidence=0.8, layout_certainty=float("inf"))
+
+    with pytest.raises(ValueError):
+        CalibratorFeatures(token_confidence=0.8, normalization_confidence=float("-inf"))
+
+
+# 6. raw confidence remains distinct semantically from calibrated confidence
 def test_raw_confidence_distinct_from_calibrated():
     """CalibrationResult structurally preserves raw confidence distinct from calibrated confidence."""
     feat = CalibratorFeatures(token_confidence=0.88, field_class="survey_number")
@@ -165,7 +203,7 @@ def test_raw_confidence_distinct_from_calibrated():
     assert 0.0 <= res.calibrated_confidence <= 1.0
 
 
-# 5. categorical/numerical feature encoding is deterministic
+# 7. categorical/numerical feature encoding is deterministic
 def test_feature_encoding_deterministic():
     """CalibratorFeatureEncoder produces deterministic feature names and vectors."""
     feat1 = CalibratorFeatures(
@@ -185,10 +223,34 @@ def test_feature_encoding_deterministic():
 
     assert vec1 == vec2
     assert len(vec1) == len(encoder.feature_names)
-    assert encoder.feature_names == sorted(encoder.feature_names[:0]) + encoder.feature_names  # Deterministic list
 
 
-# 6. canonical 5-part stratum is preserved
+# 8. configurable feature encoding policy and missingness indicators
+def test_configurable_feature_encoding_policy():
+    """FeatureEncodingPolicy configures default imputation values and missingness flags."""
+    custom_policy = FeatureEncodingPolicy(
+        default_layout_certainty=0.75,
+        default_normalization_confidence=0.65,
+        default_empty_validator_pass_ratio=0.80,
+        include_missingness_indicators=True,
+    )
+    encoder = CalibratorFeatureEncoder(policy=custom_policy)
+
+    feat_missing = CalibratorFeatures(token_confidence=0.9)  # layout and norm are None
+    vec = encoder.encode(feat_missing)
+
+    names = encoder.feature_names
+    assert "layout_is_missing" in names
+    assert "normalization_is_missing" in names
+    assert "has_validators" in names
+
+    layout_idx = names.index("layout_certainty")
+    layout_missing_idx = names.index("layout_is_missing")
+    assert vec[layout_idx] == 0.75
+    assert vec[layout_missing_idx] == 1.0
+
+
+# 9. canonical 5-part stratum is preserved
 def test_canonical_5_part_stratum_preserved():
     """Canonical stratum computation strictly invokes domain.stratum.stratum_key."""
     feat = CalibratorFeatures(
@@ -210,7 +272,22 @@ def test_canonical_5_part_stratum_preserved():
     assert feat.canonical_stratum() == "survey_number|devanagari|handwritten|poor|cluster_02"
 
 
-# 7. stratum-specific model is selected when evidence is sufficient
+# 10. writer cluster not accidentally injected into pooled model features
+def test_writer_cluster_not_in_pooled_model_features():
+    """writer_cluster_id is strictly stratum identity and must not be a pooled model feature."""
+    feat = CalibratorFeatures(
+        token_confidence=0.8,
+        field_class="survey_number",
+        script="devanagari",
+        writer_cluster_id="cluster_memorize_me",
+    )
+    encoder = CalibratorFeatureEncoder.from_features_list([feat])
+
+    assert all("cluster_memorize_me" not in name for name in encoder.feature_names)
+    assert all("writer_cluster" not in name for name in encoder.feature_names)
+
+
+# 11. stratum-specific model is selected when evidence is sufficient
 def test_stratum_specific_selected_when_evidence_sufficient():
     """PerStratumCalibrator routes to stratum model when stratum samples >= min_stratum_samples."""
     target_stratum = "survey_number|devanagari|handwritten|medium|cluster_01"
@@ -234,10 +311,9 @@ def test_stratum_specific_selected_when_evidence_sufficient():
     assert res.stratum == target_stratum
 
 
-# 8. pooled fallback is selected when evidence is insufficient
+# 12. pooled fallback is selected when evidence is insufficient
 def test_pooled_fallback_selected_when_evidence_insufficient():
     """PerStratumCalibrator routes to pooled fallback when stratum evidence is insufficient."""
-    target_stratum = "survey_number|devanagari|handwritten|medium|cluster_01"
     labels_target = [
         _make_sample_label(f"ext_t_{i}", f"p_{i}", is_correct=True)
         for i in range(3)
@@ -258,7 +334,26 @@ def test_pooled_fallback_selected_when_evidence_insufficient():
     assert res.regime == CalibrationRegime.POOLED_FALLBACK
 
 
-# 9. calibration regime is explicitly recorded
+# 13. unseen stratum falls back to pooled model
+def test_unseen_stratum_falls_back_to_pooled():
+    """Unseen stratum without training presence routes cleanly to pooled fallback."""
+    labels = [_make_sample_label(f"ext_{i}", f"p_{i}", is_correct=True) for i in range(10)]
+    calibrator = train_per_stratum_calibrators(labels, min_stratum_samples=5)
+
+    unseen_feat = CalibratorFeatures(
+        token_confidence=0.8,
+        field_class="unseen_field",
+        script="bengali",
+        print_or_handwriting="printed",
+        legibility_band="good",
+        writer_cluster_id="unseen_cluster",
+    )
+    res = calibrator.calibrate(unseen_feat)
+
+    assert res.regime == CalibrationRegime.POOLED_FALLBACK
+
+
+# 14. calibration regime is explicitly recorded
 def test_calibration_regime_explicitly_recorded():
     """CalibrationResult explicitly records either STRATUM_SPECIFIC or POOLED_FALLBACK."""
     pooled = DeterministicCalibratorModel(lambda f: (0.75, {}))
@@ -281,18 +376,18 @@ def test_calibration_regime_explicitly_recorded():
     assert res2.regime == CalibrationRegime.POOLED_FALLBACK
 
 
-# 10. no novelty feature enters the learned feature vector
+# 15. no novelty feature enters the learned feature vector
 def test_no_novelty_in_learned_feature_vector():
     """Novelty is strictly decoupled from calibrator features and encoder feature names (FR-CNF-14)."""
     feature_fields = [f.name for f in dataclasses.fields(CalibratorFeatures)]
     assert "novelty" not in feature_fields
     assert "novelty_score" not in feature_fields
 
-    encoder = CalibratorFeatureEncoder(extra_categories=["fc_survey", "sc_devanagari"])
+    encoder = CalibratorFeatureEncoder(extra_categories=["field_class=survey", "script=devanagari"])
     assert all("novelty" not in name for name in encoder.feature_names)
 
 
-# 11. threshold derives from configured target error rate
+# 16. threshold derives from configured target error rate
 def test_threshold_policy_derives_from_target_error_rate():
     """ThresholdPolicy derives required confidence directly as (1.0 - target_error_rate)."""
     policy_1pct = ThresholdPolicy(target_error_rate=0.01)
@@ -306,7 +401,7 @@ def test_threshold_policy_derives_from_target_error_rate():
     assert policy_5pct.is_auto_acceptable(0.949) is False
 
 
-# 12. invalid target error configuration is rejected
+# 17. invalid target error configuration is rejected
 def test_invalid_target_error_configuration_rejected():
     """ThresholdPolicy rejects boundary and out-of-range target error rates."""
     with pytest.raises(ValueError):
@@ -322,18 +417,30 @@ def test_invalid_target_error_configuration_rejected():
         ThresholdPolicy(target_error_rate=1.5)
 
 
-# 13. ECE is computed from predictions and correctness labels
+# 18. ECE is computed from predictions and correctness labels
 def test_ece_computed_from_predictions_and_labels():
     """compute_ece calculates mathematically accurate Expected Calibration Error over binned predictions."""
-    # 4 predictions in bin [0.8, 0.9): all 0.85
-    # 3 correct (75% accuracy), average confidence 0.85 -> error = |0.75 - 0.85| = 0.10
     preds = [0.85, 0.85, 0.85, 0.85]
     labels = [True, True, True, False]
     ece = compute_ece(preds, labels, num_bins=10)
     assert ece == pytest.approx(0.10)
 
 
-# 14. ECE is evaluated against configurable maximum ECE
+# 19. configurable ECE bin count
+def test_configurable_ece_num_bins():
+    """compute_ece accepts configurable bin counts (FR-CNF-02, FR-LRN-08)."""
+    preds = [0.1, 0.2, 0.8, 0.9]
+    labels = [False, False, True, True]
+
+    ece_5 = compute_ece(preds, labels, num_bins=5)
+    ece_20 = compute_ece(preds, labels, num_bins=20)
+
+    assert 0.0 <= ece_5 <= 1.0
+    assert 0.0 <= ece_20 <= 1.0
+    assert DEFAULT_ECE_NUM_BINS == 10
+
+
+# 20. ECE is evaluated against configurable maximum ECE
 def test_ece_evaluated_against_configurable_max():
     """evaluate_calibration compares observed ECE against configurable threshold."""
     preds = [0.9, 0.9, 0.9, 0.9]
@@ -350,7 +457,7 @@ def test_ece_evaluated_against_configurable_max():
     assert eval_lenient.is_acceptable is True
 
 
-# 15. ECE preserves stratum/regime metadata
+# 21. ECE preserves stratum/regime metadata
 def test_ece_preserves_stratum_and_regime_metadata():
     """ECEEvaluation preserves stratum, sample count, and calibration regime metadata."""
     eval_res = evaluate_calibration(
@@ -367,9 +474,9 @@ def test_ece_preserves_stratum_and_regime_metadata():
     assert eval_res.max_acceptable_ece == 0.05
 
 
-# 16. same source document cannot silently appear in both training and evaluation partitions
-def test_same_source_document_cannot_cross_train_eval_boundary():
-    """partition_training_and_evaluation groups by source_page_digest to prevent data leakage."""
+# 22. page provenance boundary supported by actual identifiers
+def test_page_provenance_isolation_boundary():
+    """partition_training_and_evaluation enforces page-level isolation via source_page_digest."""
     labels = [
         _make_sample_label("ext_1", "doc_page_A", True),
         _make_sample_label("ext_2", "doc_page_A", False),
@@ -387,12 +494,19 @@ def test_same_source_document_cannot_cross_train_eval_boundary():
     assert len(train_pages & eval_pages) == 0
     assert len(train_split) + len(eval_split) == len(labels)
 
-    # If regression suite exclusion list overlaps, LeakageDetected is raised
+
+# 23. regression suite exclusion list enforcement
+def test_regression_suite_exclusion():
+    """Overlapping regression suite exclusion list triggers LeakageDetected."""
+    labels = [
+        _make_sample_label("ext_1", "doc_page_A", True),
+        _make_sample_label("ext_2", "doc_page_B", False),
+    ]
     with pytest.raises(LeakageDetected):
         partition_training_and_evaluation(labels, regression_suite_exclusion={"doc_page_A"})
 
 
-# 17. feature attributions are not fabricated when unsupported
+# 24. feature attributions are not fabricated when unsupported
 def test_feature_attributions_not_fabricated_when_unsupported():
     """Unfitted model returns empty feature attributions rather than arbitrary fabricated numbers."""
     unfitted_model = LogisticRegressionCalibrator()
@@ -405,20 +519,27 @@ def test_feature_attributions_not_fabricated_when_unsupported():
 
 if __name__ == "__main__":
     test_learned_model_trained_from_labeled_examples()
+    test_learned_parameters_change_when_labels_change()
     test_identical_training_data_produces_deterministic_behavior()
     test_calibrated_probability_bounded()
+    test_invalid_non_finite_inputs_rejected()
     test_raw_confidence_distinct_from_calibrated()
     test_feature_encoding_deterministic()
+    test_configurable_feature_encoding_policy()
     test_canonical_5_part_stratum_preserved()
+    test_writer_cluster_not_in_pooled_model_features()
     test_stratum_specific_selected_when_evidence_sufficient()
     test_pooled_fallback_selected_when_evidence_insufficient()
+    test_unseen_stratum_falls_back_to_pooled()
     test_calibration_regime_explicitly_recorded()
     test_no_novelty_in_learned_feature_vector()
     test_threshold_policy_derives_from_target_error_rate()
     test_invalid_target_error_configuration_rejected()
     test_ece_computed_from_predictions_and_labels()
+    test_configurable_ece_num_bins()
     test_ece_evaluated_against_configurable_max()
     test_ece_preserves_stratum_and_regime_metadata()
-    test_same_source_document_cannot_cross_train_eval_boundary()
+    test_page_provenance_isolation_boundary()
+    test_regression_suite_exclusion()
     test_feature_attributions_not_fabricated_when_unsupported()
-    print("All 17 calibrator unit tests passed successfully.")
+    print("All 24 calibrator unit tests passed successfully.")

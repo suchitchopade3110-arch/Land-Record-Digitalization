@@ -16,6 +16,11 @@ from typing import Any, Callable, Protocol
 from modelwork.domain.learning_loop.guard import LeakageDetected, assert_no_leakage
 from modelwork.domain.stratum import stratum_key
 
+# Provisional implementation default for ECE binning.
+# The source of truth (FR-CNF-02, FR-LRN-08) mandates evaluating ECE against a configured
+# maximum acceptable ECE, but does not specify a canonical bin count.
+DEFAULT_ECE_NUM_BINS: int = 10
+
 
 class CalibrationRegime(str, Enum):
     """Identifies whether calibration used a stratum-specific model or pooled fallback."""
@@ -25,12 +30,35 @@ class CalibrationRegime(str, Enum):
 
 
 @dataclass(frozen=True)
+class FeatureEncodingPolicy:
+    """Configurable policy for feature imputation, missingness indicators, and categorical mapping.
+
+    Explicitly demarcates provisional engineering defaults from source-of-truth requirements.
+    The PRD/contracts specify which feature fields exist, but do not mandate specific
+    scalar values (e.g. 0.5) for missing signals.
+    """
+
+    default_layout_certainty: float = 0.5
+    default_normalization_confidence: float = 0.5
+    default_empty_validator_pass_ratio: float = 1.0
+    legibility_scores: dict[str, float] = field(
+        default_factory=lambda: {
+            "good": 1.0,
+            "medium": 0.5,
+            "poor": 0.0,
+        }
+    )
+    include_missingness_indicators: bool = True
+
+
+@dataclass(frozen=True)
 class CalibratorFeatures:
     """Field-level input features for learned calibration (FR-CNF-01).
 
     Raw OCR/HWR token confidence is one feature among several, not the final confidence.
     Novelty is a separate gating signal (FR-CNF-14) and is not a calibration feature.
     Recognizer agreement is omitted until supported by upstream extraction contracts.
+    writer_cluster_id is part of stratum identity, NOT a pooled model feature.
     """
 
     token_confidence: float
@@ -43,6 +71,12 @@ class CalibratorFeatures:
     print_or_handwriting: str = ""
     legibility_band: str = ""
     writer_cluster_id: str = ""
+
+    def __post_init__(self) -> None:
+        for attr in ("token_confidence", "layout_certainty", "normalization_confidence"):
+            val = getattr(self, attr)
+            if val is not None and not math.isfinite(val):
+                raise ValueError(f"{attr} must be a finite real number, got {val}")
 
     def canonical_stratum(self) -> str:
         """Compute the canonical stratum key per API-Contracts §6 and domain/stratum.py."""
@@ -91,69 +125,119 @@ class DeterministicCalibratorModel:
 class CalibratorFeatureEncoder:
     """Encodes CalibratorFeatures into a deterministic numerical vector.
 
-    Excludes novelty_score (FR-CNF-14). Recognizer agreement is omitted until
-    supported by upstream extraction contracts.
+    - Excludes novelty_score (FR-CNF-14).
+    - Excludes writer_cluster_id: writer cluster is strictly stratum identity and must not
+      cause writer-cluster memorization in pooled calibration models.
+    - Recognizer agreement is omitted until supported by upstream extraction contracts.
     """
 
-    BASE_NUMERICAL = (
-        "token_confidence",
-        "layout_certainty",
-        "normalization_confidence",
-        "validator_pass_ratio",
-        "validator_has_failure",
-        "is_handwritten",
-        "legibility_score",
-    )
-
-    def __init__(self, extra_categories: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        extra_categories: list[str] | None = None,
+        policy: FeatureEncodingPolicy | None = None,
+    ) -> None:
+        self.policy = policy or FeatureEncodingPolicy()
         self.extra_categories = sorted(extra_categories or [])
-        self.feature_names = list(self.BASE_NUMERICAL) + [f"cat_{c}" for c in self.extra_categories]
+
+        base_features = [
+            "token_confidence",
+            "layout_certainty",
+        ]
+        if self.policy.include_missingness_indicators:
+            base_features.append("layout_is_missing")
+
+        base_features.append("normalization_confidence")
+        if self.policy.include_missingness_indicators:
+            base_features.append("normalization_is_missing")
+
+        base_features.extend([
+            "validator_pass_ratio",
+            "validator_has_failure",
+        ])
+        if self.policy.include_missingness_indicators:
+            base_features.append("has_validators")
+
+        base_features.extend([
+            "is_handwritten",
+            "legibility_score",
+        ])
+
+        self.feature_names = base_features + [f"{c}" for c in self.extra_categories]
 
     @classmethod
-    def from_features_list(cls, feature_list: list[CalibratorFeatures]) -> CalibratorFeatureEncoder:
-        """Create an encoder with categories discovered across all training samples in sorted order."""
+    def from_features_list(
+        cls,
+        feature_list: list[CalibratorFeatures],
+        policy: FeatureEncodingPolicy | None = None,
+    ) -> CalibratorFeatureEncoder:
+        """Create an encoder with categories discovered across training samples in sorted order.
+
+        Deliberately excludes writer_cluster_id to avoid cluster memorization.
+        """
         categories: set[str] = set()
         for f in feature_list:
             if f.field_class:
-                categories.add(f"fc_{f.field_class}")
+                categories.add(f"field_class={f.field_class}")
             if f.script:
-                categories.add(f"sc_{f.script}")
+                categories.add(f"script={f.script}")
             if f.doc_type:
-                categories.add(f"dt_{f.doc_type}")
-        return cls(sorted(categories))
+                categories.add(f"doc_type={f.doc_type}")
+        return cls(sorted(categories), policy=policy)
 
     def encode(self, features: CalibratorFeatures) -> list[float]:
         """Encode a single CalibratorFeatures into a float vector matching feature_names."""
         tok = float(features.token_confidence)
-        layout = float(features.layout_certainty) if features.layout_certainty is not None else 0.5
-        norm = float(features.normalization_confidence) if features.normalization_confidence is not None else 0.5
 
+        # Layout certainty & missingness
+        if features.layout_certainty is not None:
+            layout = float(features.layout_certainty)
+            layout_missing = 0.0
+        else:
+            layout = self.policy.default_layout_certainty
+            layout_missing = 1.0
+
+        # Normalization confidence & missingness
+        if features.normalization_confidence is not None:
+            norm = float(features.normalization_confidence)
+            norm_missing = 0.0
+        else:
+            norm = self.policy.default_normalization_confidence
+            norm_missing = 1.0
+
+        # Validator outcomes & missingness
         if features.validator_outcomes:
             total_vals = len(features.validator_outcomes)
             passes = sum(1 for v in features.validator_outcomes.values() if str(v).lower() == "pass")
             fails = sum(1 for v in features.validator_outcomes.values() if str(v).lower() == "fail")
             pass_ratio = passes / total_vals
             has_failure = 1.0 if fails > 0 else 0.0
+            has_validators = 1.0
         else:
-            pass_ratio = 1.0
+            pass_ratio = self.policy.default_empty_validator_pass_ratio
             has_failure = 0.0
+            has_validators = 0.0
 
         is_hw = 1.0 if features.print_or_handwriting.lower() == "handwritten" else 0.0
+        leg_score = self.policy.legibility_scores.get(features.legibility_band.lower(), 0.5)
 
-        leg_str = features.legibility_band.lower()
-        if leg_str == "good":
-            leg_score = 1.0
-        elif leg_str == "poor":
-            leg_score = 0.0
-        else:
-            leg_score = 0.5
+        vector = [tok, layout]
+        if self.policy.include_missingness_indicators:
+            vector.append(layout_missing)
 
-        vector = [tok, layout, norm, pass_ratio, has_failure, is_hw, leg_score]
+        vector.append(norm)
+        if self.policy.include_missingness_indicators:
+            vector.append(norm_missing)
+
+        vector.extend([pass_ratio, has_failure])
+        if self.policy.include_missingness_indicators:
+            vector.append(has_validators)
+
+        vector.extend([is_hw, leg_score])
 
         active_cats = {
-            f"fc_{features.field_class}",
-            f"sc_{features.script}",
-            f"dt_{features.doc_type}",
+            f"field_class={features.field_class}",
+            f"script={features.script}",
+            f"doc_type={features.doc_type}",
         }
         for cat in self.extra_categories:
             vector.append(1.0 if cat in active_cats else 0.0)
@@ -161,12 +245,18 @@ class CalibratorFeatureEncoder:
         return vector
 
 
+def _sigmoid(z: float) -> float:
+    """Numerically safe logistic sigmoid function."""
+    clamped_z = max(-50.0, min(50.0, z))
+    return 1.0 / (1.0 + math.exp(-clamped_z))
+
+
 class LogisticRegressionCalibrator:
     """Learned field-level calibrator using regularized logistic regression (FR-CNF-01).
 
     Minimizes binary cross-entropy with L2 regularization over observed correctness labels.
     Deterministic across runs for identical training data.
-    Provides feature attributions based on linear model coefficients (FR-REV-15).
+    Provides linear feature attributions based on learned model coefficients (FR-REV-15).
     """
 
     def __init__(
@@ -185,13 +275,15 @@ class LogisticRegressionCalibrator:
         self.is_fitted: bool = False
 
     def fit(self, examples: list[tuple[CalibratorFeatures, bool]]) -> LogisticRegressionCalibrator:
-        """Fit model weights on labeled examples using deterministic gradient descent."""
+        """Fit model weights on labeled examples using deterministic batch gradient descent."""
         if not examples:
             raise ValueError("Cannot fit calibrator on empty examples")
 
         if not self.encoder.extra_categories:
             all_feats = [feat for feat, _ in examples]
-            self.encoder = CalibratorFeatureEncoder.from_features_list(all_feats)
+            self.encoder = CalibratorFeatureEncoder.from_features_list(
+                all_feats, policy=self.encoder.policy
+            )
 
         x_matrix = [self.encoder.encode(feat) for feat, _ in examples]
         y_vec = [1.0 if correct else 0.0 for _, correct in examples]
@@ -211,8 +303,7 @@ class LogisticRegressionCalibrator:
                 yi = y_vec[i]
 
                 z = sum(w * x for w, x in zip(weights, xi)) + bias
-                clamped_z = max(-50.0, min(50.0, z))
-                p = 1.0 / (1.0 + math.exp(-clamped_z))
+                p = _sigmoid(z)
 
                 err = p - yi
                 for j in range(num_features):
@@ -236,16 +327,14 @@ class LogisticRegressionCalibrator:
     def predict_calibrated_confidence(
         self, features: CalibratorFeatures
     ) -> tuple[float, dict[str, float]]:
-        """Compute calibrated probability and feature attributions."""
+        """Compute calibrated probability and linear feature attributions."""
         if not self.is_fitted:
-            # Unfitted models do not fabricate arbitrary attribution numbers
             raw = max(0.0, min(1.0, float(features.token_confidence)))
             return raw, {}
 
         xi = self.encoder.encode(features)
         z = sum(w * x for w, x in zip(self.weights, xi)) + self.bias
-        clamped_z = max(-50.0, min(50.0, z))
-        prob = 1.0 / (1.0 + math.exp(-clamped_z))
+        prob = _sigmoid(z)
         bounded_prob = max(0.0, min(1.0, prob))
 
         attributions: dict[str, float] = {}
@@ -305,11 +394,11 @@ class ECEEvaluation:
 def compute_ece(
     predictions: list[float],
     labels: list[bool],
-    num_bins: int = 10,
+    num_bins: int = DEFAULT_ECE_NUM_BINS,
 ) -> float:
     """Compute Expected Calibration Error (ECE) over prediction probabilities and binary labels.
 
-    num_bins is an explicit parameter (default 10) to avoid hardcoded magic constants.
+    num_bins is an explicit configurable parameter defaulting to DEFAULT_ECE_NUM_BINS (10).
     """
     if len(predictions) != len(labels):
         raise ValueError(
@@ -350,9 +439,12 @@ def evaluate_calibration(
     stratum: str,
     regime: CalibrationRegime,
     max_acceptable_ece: float,
-    num_bins: int = 10,
+    num_bins: int = DEFAULT_ECE_NUM_BINS,
 ) -> ECEEvaluation:
-    """Evaluate calibration quality against configured max acceptable ECE (FR-CNF-02, FR-LRN-08)."""
+    """Evaluate calibration quality against configured max acceptable ECE (FR-CNF-02, FR-LRN-08).
+
+    max_acceptable_ece is required and driven by configuration.
+    """
     ece = compute_ece(predictions, labels, num_bins=num_bins)
     return ECEEvaluation(
         ece=ece,
@@ -368,6 +460,7 @@ class CorrectionLabel:
     """Ground-truth correctness observation from the review/correction process.
 
     Used for training and evaluating calibrators without data leakage (FR-LRN-01/11).
+    source_page_digest provides page-level provenance per contracts/schemas/correction.schema.json.
     """
 
     extraction_id: str
@@ -382,11 +475,13 @@ def partition_training_and_evaluation(
     eval_fraction: float = 0.2,
     regression_suite_exclusion: set[str] | None = None,
 ) -> tuple[list[CorrectionLabel], list[CorrectionLabel]]:
-    """Partition correction labels into training and evaluation splits by source document/page.
+    """Partition correction labels into training and evaluation splits by source_page_digest.
 
-    Guarantees that all extraction examples sharing the same source_page_digest are assigned
-    exclusively to either training or evaluation, preventing document-level data leakage (FR-LRN-11).
-    Applies assert_no_leakage against the regression suite exclusion list if provided.
+    Guarantees page-level isolation (FR-LRN-11): all extraction examples sharing the same
+    source_page_digest are assigned exclusively to either training or evaluation.
+    NOTE: Isolation is strictly page-level based on the authoritative source_page_digest in
+    contracts/schemas/correction.schema.json; document-level isolation across multi-page documents
+    is limited by the absence of a document identifier in the correction schema.
     """
     pages: dict[str, list[CorrectionLabel]] = {}
     for lbl in labels:
@@ -463,6 +558,7 @@ def train_per_stratum_calibrators(
     learning_rate: float = 0.5,
     iterations: int = 150,
     l2_reg: float = 0.01,
+    policy: FeatureEncodingPolicy | None = None,
 ) -> PerStratumCalibrator:
     """Train per-stratum calibrators with explicit pooled fallback (FR-CNF-02).
 
@@ -474,7 +570,7 @@ def train_per_stratum_calibrators(
         raise ValueError("Cannot train calibrators with empty training labels")
 
     all_feats = [lbl.features for lbl in training_labels]
-    shared_encoder = CalibratorFeatureEncoder.from_features_list(all_feats)
+    shared_encoder = CalibratorFeatureEncoder.from_features_list(all_feats, policy=policy)
 
     pooled_model = LogisticRegressionCalibrator(
         learning_rate=learning_rate,
