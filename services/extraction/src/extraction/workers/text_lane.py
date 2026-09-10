@@ -1,14 +1,12 @@
-"""Text lane pipeline: layout analysis -> printed OCR / HWR -> field extraction -> strikethrough -> assembly."""
+"""Text lane pipeline: layout analysis -> printed OCR -> field extraction -> strikethrough -> assembly."""
 
 from __future__ import annotations
 
 from observability import traced_consumer
 
 from extraction.domain.ocr.baidu_unlimited import BaiduUnlimitedOCRAdapter
-from extraction.domain.ocr.field_extractor import extract_fields_for_doctype
-from extraction.domain.ocr.hwr_adapter import HWRAdapter
+from extraction.domain.ocr.pipeline import process_page_text
 from extraction.domain.ocr.relationship_extractor import extract_relationships
-from extraction.domain.ocr.table_extractor import extract_table_cells
 from extraction.domain.record_assembly import assemble
 from extraction.domain.strikethrough import detect_strikethrough
 from extraction.publishers.assembly_publisher import publish_text_lane_result
@@ -29,25 +27,17 @@ def handle(message: dict) -> dict:
     trace_id = message.get("trace_id") or f"{payload.get('document_id', 'doc')}:{payload.get('page_id', 'page')}"
 
     page_id = payload.get("page_id") or payload.get("id") or "00000000-0000-0000-0000-000000000000"
-    doc_type = payload.get("doc_type")
-    page_role = payload.get("page_role")
-    config_version = work_envelope.get("config_version") or "v1"
-
-    image_bytes = payload.get("image_bytes") or b"fake_image_bytes"
     page_strokes = payload.get("page_strokes") or []
 
-    # 1. OCR Engine Selection (Printed OCR vs HWR vs Table Extractor)
-    if page_role == "tabular_register" or doc_type in ("jamabandi", "khasra_khatauni"):
-        ocr_result = extract_table_cells(image_bytes, page_id=page_id, config_version=config_version)
-    elif page_role == "endorsement":
-        adapter = HWRAdapter()
-        ocr_result = adapter.process_image(image_bytes, page_id=page_id, config_version=config_version)
-    else:
-        adapter = BaiduUnlimitedOCRAdapter(allow_test_fallback=True)
-        ocr_result = adapter.process_image(image_bytes, page_id=page_id, config_version=config_version)
+    # Inject default fake image bytes if missing in unit test payload
+    if "image_bytes" not in payload:
+        payload = {**payload, "image_bytes": b"fake_image_bytes"}
 
-    # 2. Field Extraction & Relationship Linking
-    extractions = extract_fields_for_doctype(ocr_result, page_id=page_id, doc_type=doc_type)
+    # 1. End-to-end OCR processing vertical slice
+    ocr_adapter = BaiduUnlimitedOCRAdapter(allow_test_fallback=True)
+    extractions = process_page_text(page_payload=payload, work_envelope=work_envelope, ocr_adapter=ocr_adapter)
+
+    # 2. Relationship Linking
     extractions = extract_relationships(extractions)
 
     # 3. Geometric Strikethrough / Cancellation Analysis (FR-EXT-06)
