@@ -17,6 +17,14 @@ routes:
     callers: [shree, shruthi, tharun]
     masking: none  # config values carry no personal data
 
+  - path: /config/{scope}/{key}
+    method: POST
+    owner: suchit
+    service: backend
+    kind: rest
+    note: "P5-02b — FR-CFG-01/03 write path. Not in the frozen config-service.suchit.yaml (GET-only contract); administrator-only (Permission.CONFIG_WRITE)."
+    masking: none  # config values carry no personal data
+
   - path: /models/{module}/active
     method: GET
     owner: tharun

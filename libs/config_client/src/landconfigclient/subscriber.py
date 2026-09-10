@@ -22,14 +22,26 @@ def drain_once(
     consumer_name: str,
     *,
     count: int = 10,
-    block_ms: int = 0,
+    block_ms: int = 50,
 ) -> int:
     """Consume up to `count` pending invalidation messages once and apply
-    each to `client`. Returns the number processed. `block_ms=0` (the
-    default) makes this non-blocking, suited to being called from a
-    request-handling loop or a test; a long-running subscriber process
-    just calls this repeatedly with `block_ms>0`, the same shape every
-    other worker in this repo already uses (ADR-003).
+    each to `client`. Returns the number processed. A long-running
+    subscriber process just calls this repeatedly in a loop, the same
+    shape every other worker in this repo already uses (ADR-003).
+
+    P5-02b correction: this used to default `block_ms=0` and claim that
+    made the call non-blocking. Against `landqueue`'s Redis Streams
+    driver, `block_ms=0` is passed straight through to `XREADGROUP ...
+    BLOCK 0`, which is Redis's own syntax for "block indefinitely" — the
+    opposite of what the old docstring claimed. This went uncaught by
+    P5-04's own unit tests because they run against an in-memory fake
+    `QueuePort` that ignores `block_ms` entirely and always returns
+    immediately; it surfaced only once P5-02b's write-workflow test
+    exercised this function against a real Redis broker. `block_ms=50` is
+    a short, real poll interval instead — short enough that a caller
+    wanting non-blocking behaviour barely pays for it, and no caller can
+    accidentally hang a request thread forever the way the old default
+    would have in production.
     """
     messages = queue.consume(QUEUE_NAME, group, consumer_name, count=count, block_ms=block_ms)
     for message in messages:

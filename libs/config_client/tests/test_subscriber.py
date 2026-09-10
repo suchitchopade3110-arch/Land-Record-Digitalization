@@ -68,3 +68,37 @@ def test_drain_once_with_nothing_pending_is_a_noop():
     client = ConfigClient(fetch=lambda scope, key, cv: {})
 
     assert drain_once(client, queue, group="g", consumer_name="c") == 0
+
+
+def test_drain_once_default_does_not_block_forever_against_a_real_broker():
+    """P5-02b regression: the old default (`block_ms=0`) meant "block
+    indefinitely" against the real Redis Streams driver (`XREADGROUP ...
+    BLOCK 0`), the opposite of this function's old "non-blocking" claim —
+    `FakeQueue` above never caught it because it ignores `block_ms`
+    entirely. Skipped if no local Redis; real broker only, since the
+    whole point is proving the real driver's behaviour, not a fake's."""
+    import os
+
+    import pytest
+    import redis as redis_lib
+    from landqueue.drivers.redis_streams import RedisStreamsQueue
+
+    url = os.environ.get("QUEUE_URL", "redis://localhost:6379/0")
+    try:
+        redis_lib.Redis.from_url(url, decode_responses=True).ping()
+    except redis_lib.RedisError:
+        pytest.skip(f"no local Redis at {url}")
+
+    queue = RedisStreamsQueue(url=url)
+    client = ConfigClient(fetch=lambda scope, key, cv: {})
+
+    # No messages pending for a brand-new, uniquely-named group — if this
+    # call blocks for more than a few seconds, the regression is back.
+    import time
+
+    started = time.monotonic()
+    processed = drain_once(client, queue, group=f"regression-test-group-{time.monotonic_ns()}", consumer_name="c")
+    elapsed = time.monotonic() - started
+
+    assert processed == 0
+    assert elapsed < 5.0, f"drain_once took {elapsed:.1f}s with nothing pending — block_ms default regressed"

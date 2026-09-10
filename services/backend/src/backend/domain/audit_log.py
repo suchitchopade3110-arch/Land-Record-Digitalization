@@ -93,6 +93,22 @@ def record_publish(
     )
 
 
+def record_config_version_write(
+    session: Session, *, config_version_id: str, scope: str, key: str, author: str, approver: str,
+) -> None:
+    """FR-CFG-03/P5-02b -- a new `ConfigVersion` is recorded with both
+    actors: one entry naming the author, one naming the approver, both
+    against the same subject so a reader can correlate them without
+    joining into `config_version` itself (the audit log's own meaning
+    must never depend on a join into mutable application state, per
+    FR-PUB-03's append-only posture). No natural district for a config
+    change -- reserved system shard (P4-03), same as `record_permission_check`.
+    """
+    subject = f"{scope}:{key}:{config_version_id}"
+    chain_append(session, actor=author, action="config_version.authored", subject=subject, shard_key=SYSTEM_SHARD_KEY)
+    chain_append(session, actor=approver, action="config_version.approved", subject=subject, shard_key=SYSTEM_SHARD_KEY)
+
+
 def record_field_edit(
     session: Session, *, actor: str, record_id: str, version: int, field_name: str, reason_code: str,
     old_value: str | None, new_value: str | None, district: str | None = None,

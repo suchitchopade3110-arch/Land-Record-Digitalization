@@ -31,7 +31,7 @@ down:
 
 install: ## Editable-install every lib and service into the current Python env.
 	pip install -e $(LIBS) $(SERVICES)
-	pip install pytest jsonschema pyyaml ruff==0.16.6  # test/lint tooling, pinned to match .github/workflows/*.yml
+	pip install pytest jsonschema pyyaml httpx ruff==0.16.6  # test/lint tooling, pinned to match .github/workflows/*.yml; httpx backs FastAPI's TestClient (P5-02b, P4-10b)
 
 # ---- schema ----
 
