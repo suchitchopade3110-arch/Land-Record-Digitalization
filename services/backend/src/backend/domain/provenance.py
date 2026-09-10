@@ -61,9 +61,17 @@ class EditHistoryEntry:
 
 @dataclass(frozen=True)
 class ResolvedProvenance:
+    """`field_name` (P4-10b fix) is what lets a caller mask `raw_value` and
+    each `edit_history` entry's `predicted`/`corrected` the same way
+    `mask_extraction_for_role` masks a record's current value — a
+    personal-data field's edit history is provenance raw value in every
+    sense ADR-007 cares about, so it must never leave this dataclass
+    unmasked any more than the field's own `raw_value` does."""
+
     extraction_id: str
     document_id: str | None
     page_id: str
+    field_name: str
     bbox: dict | None
     engine: str | None
     model_version: str | None
@@ -104,6 +112,7 @@ def resolve_provenance(session: Session, extraction_id: str) -> ResolvedProvenan
         extraction_id=extraction.id,
         document_id=provenance.document_id if provenance else (page.document_id if page else None),
         page_id=extraction.page_id,
+        field_name=extraction.field_name,
         bbox=extraction.bbox,
         engine=extraction.engine,
         model_version=extraction.model_version,

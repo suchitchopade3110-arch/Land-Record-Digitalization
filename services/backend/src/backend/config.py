@@ -16,6 +16,19 @@ invalidation mechanism" bar. `observability.ConfigClient` is left as-is
 for the other three services still importing it directly; migrating them
 to `landconfigclient` is a follow-up for each of those owners, not done
 here.
+
+P4-09b: `config_client` is a process-wide singleton on purpose (one
+cache, one invalidation path for backend's whole process) — that is
+exactly why its DB access is *not* wired through a per-request
+`Depends(get_session)` the way route handlers are: a request-scoped
+session would defeat a cache meant to outlive any single request.
+`set_engine_override` is the process-wide equivalent of
+`backend.api.auth.set_identity_provider` — a settable test/deployment
+hook for the one thing that legitimately varies between a real
+deployment and a test (which database `_fetch_from_db` binds its
+sessions to), found necessary when P4-10b's live-route masking sweep
+needed `GET /closed-sets/{type}` to read the test database without
+resorting to a `DATABASE_URL` environment-variable alignment.
 """
 from __future__ import annotations
 
@@ -28,6 +41,18 @@ from backend.domain.config_versions import (
 )
 from backend.models.base import session_factory
 
+_engine_override = None
+
+
+def set_engine_override(engine) -> None:
+    """Test/deployment hook, same posture as
+    `backend.api.auth.set_identity_provider` — swaps the engine
+    `_fetch_from_db` binds its sessions to, for the whole process. Pass
+    `None` to go back to `session_factory()`'s own `DATABASE_URL`-derived
+    default."""
+    global _engine_override
+    _engine_override = engine
+
 
 def _fetch_from_db(scope: str, key: str, config_version: str | None) -> dict:
     """FR-CFG-01 — read the requested `ConfigVersion` row for (scope, key)
@@ -38,7 +63,7 @@ def _fetch_from_db(scope: str, key: str, config_version: str | None) -> dict:
     unchanged — callers (e.g. `backend.domain.closed_sets`) catch it by
     name rather than have it wrapped into something generic.
     """
-    factory = session_factory()
+    factory = session_factory(_engine_override)
     with factory() as session:
         row = (
             get_pinned_config(session, scope, key, config_version)

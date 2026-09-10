@@ -13,17 +13,11 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from backend.api.deps import get_session
 from backend.config import config_client
 from backend.domain.closed_sets import ClosedSetTypeNotFound, get_closed_set
-from backend.models.base import session_factory
 
 router = APIRouter(tags=["closed-sets"])
-
-
-def get_session():
-    factory = session_factory()
-    with factory() as session:
-        yield session
 
 
 @router.get("/closed-sets/{type}")

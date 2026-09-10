@@ -42,6 +42,20 @@ class AuditEntry(AuditBase):
     at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
     )
+    # P5-06/FR-ANL-01 — plain metadata, deliberately NOT part of the hash
+    # chain's material (`chain._compute_hash` is unchanged by this
+    # column's addition). Every district-aware audit call already threads
+    # a district through to compute a shard key (`shard_key_for`), but
+    # until this column existed that value was thrown away after hashing
+    # into a shard index — nothing preserved the literal district string
+    # anywhere queryable, which is exactly what "pages ingested/processed/
+    # published, by district" (FR-ANL-01) needs a GROUP BY over. Adding it
+    # to the hash material instead would mean recomputing/reverifying
+    # every row ever written under the old formula, a real T4.a-relevant
+    # change to the audit chain's cryptographic guarantee that a
+    # dashboard-aggregation task should not make as a side effect — see
+    # `chain.append`'s docstring for the same note at the write site.
+    district: Mapped[str | None] = mapped_column(String, index=True)
 
 
 class ChainRoot(AuditBase):

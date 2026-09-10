@@ -16,6 +16,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from backend.api.deps import get_session
 from backend.api.serializers import ReviewTaskPublicView, strip_review_task_internals
 from backend.domain.review_workflow import (
     NotTheClaimant,
@@ -25,16 +26,9 @@ from backend.domain.review_workflow import (
     skip,
     submit,
 )
-from backend.models.base import session_factory
 from backend.models.entities import ReviewTask
 
 router = APIRouter(tags=["review-tasks"])
-
-
-def get_session():
-    factory = session_factory()
-    with factory() as session:
-        yield session
 
 
 @router.get("/review-tasks", response_model=list[ReviewTaskPublicView])

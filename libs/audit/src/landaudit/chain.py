@@ -80,6 +80,7 @@ def append(
     value_hash: str | None = None,
     shard_id: int | None = None,
     shard_key: str | None = None,
+    district: str | None = None,
 ) -> AuditEntry:
     """Append one entry to the chain. `value_hash` — never the value
     itself (FR-SEC-08); callers hash a value before calling this, they
@@ -89,6 +90,19 @@ def append(
     caller commits, in the same transaction as whatever domain action this
     entry records, so the audit trail and the action it describes are
     atomic with each other.
+
+    `district` (P5-06/FR-ANL-01) is stored as plain metadata, queryable
+    directly (`AuditEntry.district`, indexed) — it is deliberately NOT
+    part of `_compute_hash`'s material. Including it would mean every
+    entry ever written before this parameter existed was hashed under a
+    different formula, so verifying old and new rows the same way would
+    require either two formulas or a full historical rehash — a real
+    change to the audit chain's tamper-evidence guarantee (T4.a) that a
+    dashboard-aggregation feature should not make as a side effect. If
+    `district` ever needs the same tamper-evidence guarantee actor/
+    action/subject/purpose/value_hash/at already have, that is a
+    deliberate ADR-level decision about the hash chain itself, not an
+    incidental one.
 
     Shard resolution, in priority order: an explicit `shard_id` (rare —
     only when a caller already knows the exact partition, e.g. the
@@ -124,6 +138,7 @@ def append(
         subject=subject,
         purpose=purpose,
         value_hash=value_hash,
+        district=district,
         # Set explicitly (rather than relying on the column's Python-side
         # default, which only fires at flush) so the timestamp used in
         # the hash computation below is exactly the one that gets stored.

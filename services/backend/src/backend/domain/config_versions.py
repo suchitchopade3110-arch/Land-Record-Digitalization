@@ -1,17 +1,30 @@
-"""FR-CFG-01/02 — read side of `ConfigVersion` (M13). `contracts/openapi/
-config-service.suchit.yaml` §4.1 defines the two shapes this module backs:
-unpinned reads ("what is effective now") and pinned reads ("this exact
-version, forever, regardless of what supersedes it").
+"""FR-CFG-01/02/03 — `ConfigVersion` (M13). `contracts/openapi/
+config-service.suchit.yaml` §4.1 defines the two read shapes this module
+backs: unpinned reads ("what is effective now") and pinned reads ("this
+exact version, forever, regardless of what supersedes it").
 
-Write-side (P5-02's two-person workflow state machine, P5-11's impact
-preview) is out of scope for this module — see
-`infra/migrations/versions/0006_phase5_config_immutability.py`'s docstring
-for what P5-02 still needs and why it isn't guessed at here. Rows are
-written directly today (by whatever process runs the two-person approval
-today); this module only ever reads — except `build_version_change_event`
-/ `publish_version_change_event` below, which exist for P5-02's future
-write endpoint to call, not for anything in this module to call itself
-(see that function's own docstring for why it is unwired today).
+`write_config_version` (P5-02b) is the write side: a single atomic
+two-actor write, not the full draft -> submitted -> approved -> effective
+workflow state machine `infra/migrations/versions/
+0006_phase5_config_immutability.py`'s docstring describes as still
+undesigned. That fuller workflow would need a `workflow_state` column
+`contracts/schemas/config_version.schema.json` has no room for — the
+schema is `additionalProperties: false` with exactly `id, scope, key,
+value, effective_from, author, approver, superseded_by`, and it already
+requires both `author` and `approver` on every row, not as a later
+transition. `write_config_version` is the write this frozen shape
+actually supports: one call names both actors and the row is effective
+(once `effective_from` arrives) immediately — there is no intermediate
+"proposed, awaiting a second person's separate action" state persisted
+anywhere. If a genuine two-HTTP-call maker-checker flow (a distinct
+second principal approving someone else's already-submitted draft) is
+wanted, that needs a new non-frozen staging table and is a further design
+decision, not a mechanical extension of this function — flagged as
+P5-02c in `PHASE5.md`'s "Outstanding, carried forward" table rather than
+guessed at here. This is a two-person *record* (the row names two
+distinct actors), not a two-person *control* (nothing independently
+verifies the second name ever took an action) — FR-CFG-03's acceptance
+is not fully met by what's built.
 """
 from __future__ import annotations
 
@@ -23,6 +36,7 @@ from landoutbox import write as outbox_write
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from backend.domain.audit_log import record_config_version_write
 from backend.models.entities import ConfigVersion
 
 
@@ -110,17 +124,89 @@ def publish_version_change_event(session: Session, row: ConfigVersion) -> None:
     invalidation" land together, the same guarantee every other
     DB-write-plus-notify path in this repo gets.
 
-    Unwired today: P5-02's two-person write workflow (draft -> submitted
-    -> approved -> effective) doesn't exist yet as a callable endpoint —
-    see `infra/migrations/versions/0006_phase5_config_immutability.py`'s
-    docstring, which reports the same gap. `ConfigVersion` rows are
-    currently written directly (raw INSERT / test fixtures), not through
-    any function in this module, so there is no single call site to wire
-    this into without fabricating a write endpoint that P5-02 is meant to
-    design properly (the approval semantics, not just the INSERT). This
-    function is built and tested (`libs/config_client`'s P5-04 suite)
-    against a fake queue so P5-02's endpoint has a one-line call to make
-    once it exists: `publish_version_change_event(session, new_row)`
-    right after `session.add(new_row)`, before that transaction commits.
+    Called by `write_config_version` below (P5-02b) — the live wiring
+    P5-04's own phase report flagged as dead code until a write path
+    existed to call it.
     """
     outbox_write(session, queue=QUEUE_NAME, envelope=build_version_change_event(row))
+
+
+class AuthorEqualsApprover(ValueError):
+    """FR-CFG-03 — rejected here, at the API/domain layer, before the row
+    is even constructed. `ck_config_version_author_ne_approver` (P5-01) is
+    the backstop that holds even if this check is bypassed (a raw INSERT,
+    a future caller that skips this function) — T(P5-02b).1 asserts both
+    layers independently, not just this one."""
+
+    def __init__(self, actor: str):
+        self.actor = actor
+        super().__init__(f"author and approver must be distinct actors — both were {actor!r}")
+
+
+def write_config_version(
+    session: Session,
+    *,
+    scope: str,
+    key: str,
+    value: dict,
+    effective_from: datetime,
+    author: str,
+    approver: str,
+) -> ConfigVersion:
+    """P5-02b — the one write path for `ConfigVersion` (FR-CFG-01/03).
+
+    - Rejects `author == approver` before touching the database
+      (`AuthorEqualsApprover`) — the DB `CHECK` is the backstop, not the
+      primary enforcement point.
+    - Finds the current head for `(scope, key)` — the row with
+      `superseded_by IS NULL`, most recent `effective_from` — and points
+      its `superseded_by` at the new row. That is the *only* column
+      touched on the prior row (0006's trigger rejects an `UPDATE` of any
+      other column on `config_version`); `value`/`effective_from`/
+      `author`/`approver` on the prior row are untouched, so "never
+      edited in place" (FR-CFG-01) still holds for everything that
+      matters about that row's own content.
+    - `effective_from` is stored exactly as given — a forward-dated row
+      simply isn't picked by `get_effective_config`'s `effective_from <=
+      now` filter until that moment arrives; nothing here needs to treat
+      "not yet effective" as a special case.
+    - Audits both actors (`record_config_version_write`) and publishes
+      the cache-invalidation event (`publish_version_change_event`) in
+      the same transaction as the two row writes — the caller commits
+      once, so all four effects land together or not at all (ADR-005's
+      posture, applied here without an outbox for the audit/supersede
+      writes since they're ordinary rows in the same transaction, not a
+      cross-system call).
+
+    Does not commit — the caller (`api/config_service.py`'s write route)
+    commits once every effect above has been staged.
+    """
+    if author == approver:
+        raise AuthorEqualsApprover(author)
+
+    prior_head = session.execute(
+        select(ConfigVersion)
+        .where(
+            ConfigVersion.scope == scope,
+            ConfigVersion.key == key,
+            ConfigVersion.superseded_by.is_(None),
+        )
+        .order_by(ConfigVersion.effective_from.desc())
+        .limit(1)
+    ).scalar_one_or_none()
+
+    new_row = ConfigVersion(
+        scope=scope, key=key, value=value, effective_from=effective_from, author=author, approver=approver,
+    )
+    session.add(new_row)
+    session.flush()  # assigns new_row.id without committing
+
+    if prior_head is not None:
+        prior_head.superseded_by = new_row.id
+
+    record_config_version_write(
+        session, config_version_id=new_row.id, scope=scope, key=key, author=author, approver=approver,
+    )
+    publish_version_change_event(session, new_row)
+
+    return new_row
