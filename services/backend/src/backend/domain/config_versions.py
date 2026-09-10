@@ -19,8 +19,12 @@ actually supports: one call names both actors and the row is effective
 anywhere. If a genuine two-HTTP-call maker-checker flow (a distinct
 second principal approving someone else's already-submitted draft) is
 wanted, that needs a new non-frozen staging table and is a further design
-decision, not a mechanical extension of this function — flagged in the
-P5-02b phase report rather than guessed at here.
+decision, not a mechanical extension of this function — flagged as
+P5-02c in `PHASE5.md`'s "Outstanding, carried forward" table rather than
+guessed at here. This is a two-person *record* (the row names two
+distinct actors), not a two-person *control* (nothing independently
+verifies the second name ever took an action) — FR-CFG-03's acceptance
+is not fully met by what's built.
 """
 from __future__ import annotations
 
