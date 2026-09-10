@@ -58,8 +58,23 @@ def test_drain_once_default_does_not_block_forever_against_a_real_broker():
     `block_ms` entirely (see this module's docstring). `InMemoryQueue` now
     honours `block_ms` too (proven in `tests/queue/test_conformance.py`),
     but this specific regression is worth proving against the real broker
-    directly, not just the fake — skipped if no local Redis."""
+    directly, not just the fake — skipped if no local Redis.
+
+    Deliberately does NOT use the real `QUEUE_NAME` ("config-version-events")
+    stream: that stream is shared, real production state in CI — other
+    suites in the same job (e.g. `tests/contract/
+    test_config_version_write_workflow.py`) publish onto it via the real
+    outbox relay against the same Redis instance, and `RedisStreamsQueue.
+    consume` deliberately starts a brand-new group at the *beginning* of
+    the stream, not "$" (see that method's own docstring — ADR-005's
+    no-loss guarantee for a real worker). That is correct production
+    behaviour, not a bug: a fresh group backed by a stream someone else
+    already wrote to is expected to see that backlog. This test's own
+    subject is `block_ms`'s default, which needs a stream that is
+    genuinely empty for it to observe, so it uses its own uniquely-named
+    stream instead of the shared production one."""
     import os
+    import uuid
 
     import pytest
     import redis as redis_lib
@@ -72,15 +87,26 @@ def test_drain_once_default_does_not_block_forever_against_a_real_broker():
         pytest.skip(f"no local Redis at {url}")
 
     queue = RedisStreamsQueue(url=url)
-    client = ConfigClient(fetch=lambda scope, key, cv: {})
 
-    # No messages pending for a brand-new, uniquely-named group — if this
-    # call blocks for more than a few seconds, the regression is back.
+    # A genuinely fresh stream *and* a fresh group — nothing else in this
+    # CI job ever publishes to a uuid-named stream, so unlike the shared
+    # QUEUE_NAME this is actually empty. `drain_once` itself always
+    # targets the one real, hardcoded `QUEUE_NAME` (deliberately — a
+    # subscriber drains the one production queue, not an arbitrary one),
+    # so it can't be pointed at this test's isolated stream; the point
+    # under test is `block_ms`'s *default value*, so call `queue.consume`
+    # directly with that same default, read off `drain_once`'s own
+    # signature rather than duplicated as a literal here.
+    import inspect
     import time
 
+    default_block_ms = inspect.signature(drain_once).parameters["block_ms"].default
+    own_queue = f"regression-test-stream-{uuid.uuid4()}"
+    group = f"regression-test-group-{time.monotonic_ns()}"
+
     started = time.monotonic()
-    processed = drain_once(client, queue, group=f"regression-test-group-{time.monotonic_ns()}", consumer_name="c")
+    messages = queue.consume(own_queue, group, "c", block_ms=default_block_ms)
     elapsed = time.monotonic() - started
 
-    assert processed == 0
-    assert elapsed < 5.0, f"drain_once took {elapsed:.1f}s with nothing pending — block_ms default regressed"
+    assert messages == []
+    assert elapsed < 5.0, f"consume took {elapsed:.1f}s with nothing pending — block_ms default regressed"
