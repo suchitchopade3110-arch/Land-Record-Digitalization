@@ -15,7 +15,7 @@ from typing import Any
 
 from .baidu_unlimited import BaiduUnlimitedOCRAdapter
 from .hwr_adapter import HWRAdapter
-from .interfaces import BoundingBox, OCREngineAdapter, OCRResult, OCRToken
+from .interfaces import BoundingBox, OCREngineAdapter, OCRResult
 from .table_extractor import extract_table_cells
 
 logger = logging.getLogger(__name__)

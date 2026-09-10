@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+
 from observability import traced_consumer
 
 from extraction.workers import map_lane, text_lane
@@ -43,7 +44,7 @@ def handle(message: dict) -> dict:
         try:
             results["text_lane"] = text_lane.handle(message)
         except Exception as err:
-            logger.error("Text lane error on message: %s", err, exc_info=True)
+            logger.exception("Text lane error on message")
             results["text_lane"] = {
                 "status": "error",
                 "error_type": type(err).__name__,
@@ -55,7 +56,7 @@ def handle(message: dict) -> dict:
         try:
             results["map_lane"] = map_lane.handle(message)
         except Exception as err:
-            logger.error("Map lane error on message: %s", err, exc_info=True)
+            logger.exception("Map lane error on message")
             results["map_lane"] = {
                 "status": "error",
                 "error_type": type(err).__name__,

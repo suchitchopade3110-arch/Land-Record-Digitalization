@@ -88,13 +88,13 @@ class BaiduUnlimitedOCRAdapter(OCREngineAdapter):
                 timeout=15.0,
             )
             response.raise_for_status()
-        except Exception as err:
+        except Exception as err:  # noqa: BLE001 — network/HTTP errors are many types; re-raised below as a domain-specific, secret-sanitized OCRProcessingError
             sanitized_err = self._sanitize_secrets(str(err))
             raise OCRProcessingError(f"Baidu OCR call failed: {sanitized_err}") from None
 
         try:
             data = response.json()
-        except Exception as err:
+        except Exception as err:  # noqa: BLE001 — JSON-decode errors are many types; re-raised below as a domain-specific, secret-sanitized OCRResponseParseError
             sanitized_err = self._sanitize_secrets(str(err))
             raise OCRResponseParseError(f"Failed to parse JSON response from Baidu OCR: {sanitized_err}") from None
 

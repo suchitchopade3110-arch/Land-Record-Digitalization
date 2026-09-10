@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from observability import traced_consumer
 
 from extraction.domain.ocr.baidu_unlimited import BaiduUnlimitedOCRAdapter
@@ -11,6 +13,8 @@ from extraction.domain.record_assembly import assemble
 from extraction.domain.strikethrough import detect_strikethrough
 from extraction.publishers.assembly_publisher import publish_text_lane_result
 from extraction.publishers.normalization_publisher import publish_assembly
+
+logger = logging.getLogger(__name__)
 
 
 @traced_consumer
@@ -70,6 +74,7 @@ def handle(message: dict) -> dict:
             "assembly_envelope": assembly_envelope,
         }
     except Exception as err:
+        logger.exception("Text lane processing failed for trace_id=%s", trace_id)
         return {
             "status": "error",
             "error_type": type(err).__name__,

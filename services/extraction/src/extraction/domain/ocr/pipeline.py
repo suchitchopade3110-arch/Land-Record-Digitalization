@@ -86,8 +86,8 @@ def process_page_text_with_relationships(
     except OCRProcessingError as err:
         logger.warning("OCR processing safely returned no result for page %s: %s", page_id, err)
         return [], []
-    except Exception as err:
-        logger.error("Unexpected error during OCR processing for page %s: %s", page_id, err)
+    except Exception:
+        logger.exception("Unexpected error during OCR processing for page %s", page_id)
         return [], []
 
     # 2. Extract fields across routed OCR results

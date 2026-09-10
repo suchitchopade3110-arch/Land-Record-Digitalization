@@ -115,9 +115,8 @@ def classify_field_name(text: str, doc_type: str | None = None) -> str:
         if doc_type == "jamabandi":
             return "share_fraction"
 
-    if re.search(r"^\d+$", lower):
-        if doc_type == "jamabandi":
-            return "khata_number"
+    if re.search(r"^\d+$", lower) and doc_type == "jamabandi":
+        return "khata_number"
 
     # Default fallback: Unclassified text line (no fabrication or guessing)
     return "text_line"

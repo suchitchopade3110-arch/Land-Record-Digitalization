@@ -3,10 +3,14 @@ compute area -> ULPIN eligibility gate -> MAP_QUEUE envelope.
 """
 from __future__ import annotations
 
+import logging
+
 from observability import traced_consumer
 
 from extraction.domain.parcel_pipeline import process_map_page
 from extraction.publishers.assembly_publisher import publish_map_lane_result
+
+logger = logging.getLogger(__name__)
 
 
 @traced_consumer
@@ -34,6 +38,7 @@ def handle(message: dict) -> dict:
             "map_lane_envelope": map_lane_envelope,
         }
     except Exception as err:
+        logger.exception("Map lane processing failed for trace_id=%s", trace_id)
         return {
             "status": "error",
             "error_type": type(err).__name__,
