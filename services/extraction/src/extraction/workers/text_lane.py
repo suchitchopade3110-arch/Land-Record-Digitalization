@@ -38,7 +38,7 @@ def handle(message: dict) -> dict:
     extractions = process_page_text(page_payload=payload, work_envelope=work_envelope, ocr_adapter=ocr_adapter)
 
     # 2. Relationship Linking
-    extractions = extract_relationships(extractions)
+    relationships = extract_relationships(extractions, page_id=page_id)
 
     # 3. Geometric Strikethrough / Cancellation Analysis (FR-EXT-06)
     for ext in extractions:
@@ -60,6 +60,8 @@ def handle(message: dict) -> dict:
     return {
         "status": "success",
         "extractions_count": len(extractions),
+        "relationships_count": len(relationships),
+        "relationships": relationships,
         "text_lane_envelope": text_lane_envelope,
         "assembly_envelope": assembly_envelope,
     }

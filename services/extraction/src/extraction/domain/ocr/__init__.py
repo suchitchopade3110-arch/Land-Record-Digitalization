@@ -5,8 +5,8 @@ from .field_extractor import extract_fields_for_doctype
 from .hwr_adapter import HWRAdapter
 from .interfaces import BoundingBox, OCREngineAdapter, OCRResult, OCRToken
 from .normalization import get_unconstrained_value, normalize_text
-from .pipeline import process_page_text
-from .relationship_extractor import extract_relationships
+from .pipeline import process_page_text, process_page_text_with_relationships
+from .relationship_extractor import OwnerParcelShareBinding, extract_relationships
 from .table_extractor import extract_table_cells
 
 __all__ = [
@@ -16,10 +16,12 @@ __all__ = [
     "OCREngineAdapter",
     "OCRResult",
     "OCRToken",
+    "OwnerParcelShareBinding",
     "extract_fields_for_doctype",
     "extract_relationships",
     "extract_table_cells",
     "get_unconstrained_value",
     "normalize_text",
     "process_page_text",
+    "process_page_text_with_relationships",
 ]
