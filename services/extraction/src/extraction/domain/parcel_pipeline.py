@@ -58,7 +58,11 @@ def process_map_page(
     parcel_geometries: list[dict[str, Any]] = []
 
     for item in bound_parcels:
-        polygon = item["polygon"]
+        polygon = item.get("polygon")
+        if not item.get("is_valid", True) or not polygon:
+            logger.info("Skipping invalid/broken parcel boundary item %s", item.get("boundary_id"))
+            continue
+
         area_str = compute_area(polygon, crs=georef_res.crs)
 
         pg_dict = {

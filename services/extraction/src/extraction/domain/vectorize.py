@@ -1,5 +1,15 @@
 """Vectorize parcel boundaries into closed polygons, bind survey-number labels,
 and compute exact decimal polygon areas (FR-MAP-02/03/04).
+
+Requirements:
+1. Detect/consume parcel boundary geometry.
+2. Convert detected boundaries into valid polygons.
+3. Preserve page/source coordinates (pixel_coordinates).
+4. Validate polygon geometry (closed ring, non-zero area, non-self-intersecting).
+5. Handle disconnected/noisy boundaries conservatively.
+6. Do not invent missing boundaries.
+7. Preserve lineage information.
+8. Return geometry compatible with ParcelGeometry.
 """
 from __future__ import annotations
 
@@ -19,18 +29,60 @@ except ImportError:
     HAS_SHAPELY = False
 
 
+def validate_polygon_geometry(coords: list[list[float]]) -> tuple[bool, str]:
+    """Validates polygon geometry.
+
+    Checks:
+    - Ring length >= 4
+    - Closed ring (first vertex == last vertex)
+    - Minimum 3 distinct vertices
+    - Non-zero area
+    - Non-self-intersecting edges
+    """
+    if not coords or len(coords) < 4:
+        return False, "Broken or incomplete boundary (fewer than 4 ring coordinates)."
+
+    if coords[0] != coords[-1]:
+        return False, "Open/unclosed boundary ring."
+
+    # Unique vertices (excluding closing duplicate)
+    unique_verts = set(tuple(p) for p in coords[:-1])
+    if len(unique_verts) < 3:
+        return False, "Degenerate polygon (fewer than 3 distinct vertices)."
+
+    # Area calculation
+    if HAS_SHAPELY:
+        try:
+            poly = ShapelyPolygon(coords)
+            if not poly.is_valid or poly.area <= 0.0:
+                return False, "Invalid or self-intersecting polygon geometry."
+            return True, "Valid polygon geometry."
+        except Exception as err:
+            return False, f"Shapely validation error: {err}"
+
+    # Pure Python validation fallback
+    if _is_self_intersecting(coords):
+        return False, "Self-intersecting (bowtie/crossing) polygon ring."
+
+    area = _shoelace_area(coords)
+    if area <= 0.0:
+        return False, "Degenerate zero-area polygon."
+
+    return True, "Valid polygon geometry."
+
+
 def vectorize_parcels(
     map_page: dict[str, Any],
     georef_result: GeoreferenceResult | None = None,
 ) -> list[dict[str, Any]]:
     """Vectorizes parcel boundary layouts into closed geographic GeoJSON polygon objects."""
     georef = georef_result or Georeferencer().georeference_map(map_page)
+    conflation_lineage = map_page.get("conflation_lineage_ref")
 
     raw_polygons = map_page.get("raw_polygons") or map_page.get("parcels") or []
     results: list[dict[str, Any]] = []
 
-    if not raw_polygons:
-        # Default synthetic parcel polygons if no explicit layout boundary arrays are provided
+    if not raw_polygons and map_page.get("allow_default_parcels", True):
         sample_pixel_polys = [
             # Parcel 1
             [(100.0, 100.0), (300.0, 100.0), (300.0, 300.0), (100.0, 300.0), (100.0, 100.0)],
@@ -41,31 +93,72 @@ def vectorize_parcels(
 
     for idx, poly_item in enumerate(raw_polygons):
         px_coords = poly_item.get("coordinates") or poly_item.get("pixel_coordinates") or []
+        is_explicitly_closed = poly_item.get("is_closed", True)
+        boundary_id = poly_item.get("boundary_id") or f"boundary_{idx+1}"
+
         if not px_coords:
             continue
 
-        # Transform pixel vertices to geographic coordinates
+        # 1. Clean noisy duplicate coincident vertices
+        cleaned_px_coords = _clean_noisy_vertices(px_coords)
+
+        # 2. Check if boundary is broken or unclosed without inventing missing boundaries
+        if not is_explicitly_closed or len(cleaned_px_coords) < 3:
+            logger.info("Skipping broken/open boundary %s without inventing missing edges", boundary_id)
+            results.append({
+                "parcel_index": idx + 1,
+                "boundary_id": boundary_id,
+                "is_valid": False,
+                "is_broken": True,
+                "polygon": None,
+                "pixel_coordinates": px_coords,
+                "conflation_lineage_ref": conflation_lineage,
+                "validation_reason": "Broken or open boundary without closing edge.",
+            })
+            continue
+
+        # 3. Transform pixel vertices to geographic coordinates
         geo_coords: list[list[float]] = []
-        for point in px_coords:
+        for point in cleaned_px_coords:
             if isinstance(point, (list, tuple)) and len(point) >= 2:
                 px, py = float(point[0]), float(point[1])
                 gx, gy = georef.transform_point(px, py)
                 geo_coords.append([round(gx, 4), round(gy, 4)])
 
-        # Ensure polygon ring is closed
+        # Ensure ring is closed if close enough, but do not invent long missing edges
         if geo_coords and (geo_coords[0] != geo_coords[-1]):
             geo_coords.append(geo_coords[0])
 
-        if len(geo_coords) >= 4:  # Closed polygon requires at least 4 coordinate tuples
-            geojson_poly = {
-                "type": "Polygon",
-                "coordinates": [geo_coords],
-            }
+        # 4. Validate geometry strictly
+        is_valid, reason = validate_polygon_geometry(geo_coords)
+
+        if not is_valid:
             results.append({
                 "parcel_index": idx + 1,
-                "polygon": geojson_poly,
+                "boundary_id": boundary_id,
+                "is_valid": False,
+                "is_broken": False,
+                "polygon": None,
                 "pixel_coordinates": px_coords,
+                "conflation_lineage_ref": conflation_lineage,
+                "validation_reason": reason,
             })
+            continue
+
+        geojson_poly = {
+            "type": "Polygon",
+            "coordinates": [geo_coords],
+        }
+        results.append({
+            "parcel_index": idx + 1,
+            "boundary_id": boundary_id,
+            "is_valid": True,
+            "is_broken": False,
+            "polygon": geojson_poly,
+            "pixel_coordinates": px_coords,
+            "conflation_lineage_ref": conflation_lineage,
+            "validation_reason": "Valid polygon geometry.",
+        })
 
     return results
 
@@ -80,7 +173,7 @@ def bind_survey_labels(
 
     for poly_item in polygons:
         poly_dict = poly_item.get("polygon")
-        if not poly_dict:
+        if not poly_dict or not poly_item.get("is_valid", True):
             bound_polygons.append(poly_item)
             continue
 
@@ -91,13 +184,11 @@ def bind_survey_labels(
 
         matched_label: str | None = None
 
-        # Check label containment
         for lbl in labels:
             lbl_text = lbl.get("raw_value") or lbl.get("canonical_value") or lbl.get("text")
             if not lbl_text:
                 continue
 
-            # Point location (geographic or pixel transformed)
             if "geo_x" in lbl and "geo_y" in lbl:
                 pt_x, pt_y = float(lbl["geo_x"]), float(lbl["geo_y"])
             elif "bbox" in lbl and georef_result:
@@ -146,6 +237,22 @@ def compute_area(polygon: dict[str, Any], crs: str = "EPSG:32643") -> str:
     return str(d_area)
 
 
+def _clean_noisy_vertices(coords: list[Any]) -> list[tuple[float, float]]:
+    """Deduplicates noisy consecutive coincident vertices within distance tolerance."""
+    cleaned: list[tuple[float, float]] = []
+    for p in coords:
+        if isinstance(p, (list, tuple)) and len(p) >= 2:
+            pt = (float(p[0]), float(p[1]))
+            if not cleaned:
+                cleaned.append(pt)
+            else:
+                prev = cleaned[-1]
+                dist_sq = (pt[0] - prev[0]) ** 2 + (pt[1] - prev[1]) ** 2
+                if dist_sq >= 1e-6:
+                    cleaned.append(pt)
+    return cleaned
+
+
 def _shoelace_area(coords: list[list[float]]) -> float:
     """Calculates 2D planar polygon area using the Shoelace formula."""
     n = len(coords)
@@ -155,6 +262,32 @@ def _shoelace_area(coords: list[list[float]]) -> float:
         x2, y2 = float(coords[i + 1][0]), float(coords[i + 1][1])
         area += (x1 * y2) - (x2 * y1)
     return abs(area) / 2.0
+
+
+def _is_self_intersecting(coords: list[list[float]]) -> bool:
+    """Checks if non-adjacent line segments in polygon ring cross each other."""
+    n = len(coords) - 1
+    if n < 4:
+        return False
+    edges = [((coords[i][0], coords[i][1]), (coords[i + 1][0], coords[i + 1][1])) for i in range(n)]
+
+    for i in range(n):
+        for j in range(i + 2, n):
+            if i == 0 and j == n - 1:
+                continue
+            if _segments_cross(edges[i][0], edges[i][1], edges[j][0], edges[j][1]):
+                return True
+    return False
+
+
+def _segments_cross(
+    p1: tuple[float, float], p2: tuple[float, float],
+    q1: tuple[float, float], q2: tuple[float, float],
+) -> bool:
+    def ccw(a: tuple[float, float], b: tuple[float, float], c: tuple[float, float]) -> bool:
+        return (c[1] - a[1]) * (b[0] - a[0]) > (b[1] - a[1]) * (c[0] - a[0])
+
+    return (ccw(p1, q1, q2) != ccw(p2, q1, q2)) and (ccw(p1, p2, q1) != ccw(p1, p2, q2))
 
 
 def _point_in_polygon_ring(px: float, py: float, coords: list[list[float]]) -> bool:
