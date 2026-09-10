@@ -331,8 +331,26 @@ def bind_survey_labels(
     return bound_polygons
 
 
+GEOGRAPHIC_CRS_PATTERNS = {"4326", "WGS84", "WGS-84", "OGC:CRS84", "4269", "NAD83", "GEOGCS"}
+
+
+def is_geographic_crs(crs: str | None) -> bool:
+    """Returns True if the CRS specifies geographic (angular lon/lat degrees) coordinates."""
+    if not crs:
+        return False
+    crs_clean = str(crs).strip().upper()
+    return any(pat in crs_clean for pat in GEOGRAPHIC_CRS_PATTERNS)
+
+
 def compute_area(polygon: dict[str, Any], crs: str = "EPSG:32643") -> str:
-    """Computes exact geographic polygon area and returns exact decimal string (never float, API-Contracts §1)."""
+    """Computes exact physical polygon area in square meters and returns exact decimal string (never float, API-Contracts §1).
+
+    Handles CRS sensitivity:
+    - Projected CRS (e.g. EPSG:32643 UTM, EPSG:3857): computes area in metric planar space.
+    - Geographic CRS (e.g. EPSG:4326 WGS84): transforms angular lon/lat coordinates to local metric space
+      before computing physical area in square meters.
+    - Invalid polygons (None, degenerate, unclosed, self-intersecting): handled safely returning "0.00".
+    """
     if not isinstance(polygon, dict):
         return "0.00"
 
@@ -340,14 +358,63 @@ def compute_area(polygon: dict[str, Any], crs: str = "EPSG:32643") -> str:
     if not coords or len(coords) < 3:
         return "0.00"
 
-    if HAS_SHAPELY:
-        shapely_poly = ShapelyPolygon(coords)
-        raw_area = abs(float(shapely_poly.area))
+    formatted_coords: list[list[float]] = []
+    for pt in coords:
+        if isinstance(pt, (list, tuple)) and len(pt) >= 2:
+            formatted_coords.append([float(pt[0]), float(pt[1])])
+
+    if len(formatted_coords) < 3:
+        return "0.00"
+
+    if formatted_coords[0] != formatted_coords[-1]:
+        formatted_coords.append(formatted_coords[0])
+
+    is_valid, _ = validate_polygon_geometry(formatted_coords)
+    if not is_valid:
+        return "0.00"
+
+    if is_geographic_crs(crs):
+        metric_coords = _geographic_to_metric_coords(formatted_coords)
     else:
-        raw_area = _shoelace_area(coords)
+        metric_coords = formatted_coords
+
+    if HAS_SHAPELY:
+        try:
+            shapely_poly = ShapelyPolygon(metric_coords)
+            raw_area = abs(float(shapely_poly.area))
+        except Exception:
+            raw_area = _shoelace_area(metric_coords)
+    else:
+        raw_area = _shoelace_area(metric_coords)
 
     d_area = Decimal(str(raw_area)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     return str(d_area)
+
+
+def _geographic_to_metric_coords(coords: list[list[float]]) -> list[list[float]]:
+    """Transforms geographic longitude/latitude coordinates (degrees) to local metric planar coordinates (meters)."""
+    import math
+
+    R = 6371008.8  # Mean Earth radius in meters (WGS84 spherical approximation)
+    pts = coords[:-1] if coords[0] == coords[-1] and len(coords) > 1 else coords
+    n = len(pts)
+    if n == 0:
+        return coords
+
+    lon0 = sum(p[0] for p in pts) / n
+    lat0 = sum(p[1] for p in pts) / n
+
+    lat0_rad = math.radians(lat0)
+    cos_lat0 = math.cos(lat0_rad)
+
+    metric_coords: list[list[float]] = []
+    for p in coords:
+        lon, lat = p[0], p[1]
+        x = math.radians(lon - lon0) * R * cos_lat0
+        y = math.radians(lat - lat0) * R
+        metric_coords.append([x, y])
+
+    return metric_coords
 
 
 def _clean_noisy_vertices(coords: list[Any]) -> list[tuple[float, float]]:
