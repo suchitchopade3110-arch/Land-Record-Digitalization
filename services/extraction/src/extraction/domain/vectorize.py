@@ -14,16 +14,17 @@ Requirements:
 from __future__ import annotations
 
 import logging
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
-from .georeference import GeoreferenceResult, Georeferencer
+from .georeference import Georeferencer, GeoreferenceResult
 
 logger = logging.getLogger(__name__)
 
 # Optional Shapely support with pure Python/NumPy fallback
 try:
-    from shapely.geometry import Point as ShapelyPoint, Polygon as ShapelyPolygon
+    from shapely.geometry import Point as ShapelyPoint
+    from shapely.geometry import Polygon as ShapelyPolygon
     HAS_SHAPELY = True
 except ImportError:
     HAS_SHAPELY = False
@@ -46,7 +47,7 @@ def validate_polygon_geometry(coords: list[list[float]]) -> tuple[bool, str]:
         return False, "Open/unclosed boundary ring."
 
     # Unique vertices (excluding closing duplicate)
-    unique_verts = set(tuple(p) for p in coords[:-1])
+    unique_verts = {tuple(p) for p in coords[:-1]}
     if len(unique_verts) < 3:
         return False, "Degenerate polygon (fewer than 3 distinct vertices)."
 
@@ -57,7 +58,7 @@ def validate_polygon_geometry(coords: list[list[float]]) -> tuple[bool, str]:
             if not poly.is_valid or poly.area <= 0.0:
                 return False, "Invalid or self-intersecting polygon geometry."
             return True, "Valid polygon geometry."
-        except Exception as err:
+        except Exception as err:  # noqa: BLE001 — shapely can raise several distinct error types; reported in the validation-failure message below
             return False, f"Shapely validation error: {err}"
 
     # Pure Python validation fallback
@@ -287,7 +288,7 @@ def bind_survey_labels(
 
         inside_candidates = [c for c in candidates if c[2]]
         pool = inside_candidates if inside_candidates else candidates
-        distinct_texts = set(c[0]["text"] for c in pool)
+        distinct_texts = {c[0]["text"] for c in pool}
 
         if len(distinct_texts) > 1:
             bound_polygons.append({
@@ -300,7 +301,7 @@ def bind_survey_labels(
             })
             continue
 
-        best_lbl, best_dist, is_inside = min(pool, key=lambda c: c[1])
+        best_lbl, _best_dist, is_inside = min(pool, key=lambda c: c[1])
         lbl_idx = best_lbl["index"]
 
         lbl_parcels = label_candidates[lbl_idx]
@@ -382,7 +383,7 @@ def compute_area(polygon: dict[str, Any], crs: str = "EPSG:32643") -> str:
         try:
             shapely_poly = ShapelyPolygon(metric_coords)
             raw_area = abs(float(shapely_poly.area))
-        except Exception:
+        except Exception:  # noqa: BLE001 — shapely can raise several distinct error types; falls back to the pure-Python shoelace calculation below
             raw_area = _shoelace_area(metric_coords)
     else:
         raw_area = _shoelace_area(metric_coords)
@@ -477,13 +478,11 @@ def _point_in_polygon_ring(px: float, py: float, coords: list[list[float]]) -> b
     p1x, p1y = float(coords[0][0]), float(coords[0][1])
     for i in range(n + 1):
         p2x, p2y = float(coords[i % n][0]), float(coords[i % n][1])
-        if py > min(p1y, p2y):
-            if py <= max(p1y, p2y):
-                if px <= max(p1x, p2x):
-                    if p1y != p2y:
-                        xinters = (py - p1y) * (p2x - p1x) / (p2y - p1y) + p1x
-                    if p1x == p2x or px <= xinters:
-                        inside = not inside
+        if py > min(p1y, p2y) and py <= max(p1y, p2y) and px <= max(p1x, p2x):
+            if p1y != p2y:
+                xinters = (py - p1y) * (p2x - p1x) / (p2y - p1y) + p1x
+            if p1x == p2x or px <= xinters:
+                inside = not inside
         p1x, p1y = p2x, p2y
     return inside
 
@@ -510,8 +509,7 @@ def _point_to_polygon_distance(px: float, py: float, coords: list[list[float]]) 
             proj_y = y1 + t * dy
             dist_sq = (px - proj_x) ** 2 + (py - proj_y) ** 2
 
-        if dist_sq < min_dist_sq:
-            min_dist_sq = dist_sq
+        min_dist_sq = min(min_dist_sq, dist_sq)
 
     return math.sqrt(min_dist_sq)
 

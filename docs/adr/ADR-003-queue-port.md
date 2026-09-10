@@ -100,3 +100,34 @@ and exercised directly by T1.c):
 
 No other parameter or behaviour was found silently diverging between the
 fake and the real drivers as of this audit.
+
+### `replay_from`'s delivery_count rule (P5-06 Block 4 — promoted from a commit body to a stated rule)
+
+The parity-audit table above found this as a narrower observation about
+Redis specifically; stating it plainly, as a rule every driver must
+satisfy, not a Redis-only quirk to note in passing:
+
+**Rule:** a message redelivered because a consumer called `replay_from`
+must report `QueueMessage.delivery_count == 1` — a first delivery, not a
+retry — because FR-TRI-09 requires a replay to reproduce the exact first
+run (same model versions pinned, same routing decision). A worker that
+branches on "this is a redelivery" (to skip already-done idempotent work,
+or to log a retry differently) would treat a faithful replay as if it
+were a retry of stale work if `delivery_count` carried the pre-replay
+count forward instead.
+
+- `redis_streams.py` already satisfies this, per the table above: `XGROUP
+  SETID` resets the read cursor without touching `times_delivered` on an
+  already-pending PEL entry, but a message that was ack'd before the
+  replay gets a brand-new PEL entry on the next `XREADGROUP`, starting at
+  `times_delivered = 1`.
+- `nats_jetstream.py` must match this **when it comes online** (ADR-003's
+  own Status: implemented against the port, not yet exercised against a
+  live JetStream server in this environment). Its `replay_from` deletes
+  and recreates the durable consumer (`delete_consumer` +
+  `add_consumer(..., DeliverPolicy.BY_START_SEQUENCE)`), which discards
+  JetStream's redelivery counter for that consumer entirely — the next
+  `consume()`'s `m.metadata.num_delivered` should read 1 regardless of
+  delivery history before the replay, unconditionally (no ack-first
+  caveat, unlike Redis). This is the behavior to verify first against a
+  real JetStream server, not something to re-derive from scratch.

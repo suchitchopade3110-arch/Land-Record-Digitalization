@@ -58,17 +58,27 @@ def record_page_ingested(session: Session, *, page_id: str, district: str | None
 
 
 def record_page_processed(session: Session, *, page_id: str, district: str | None = None) -> None:
-    """P5-06/FR-ANL-01 — fired once triage routing completes for a page
-    (`backend.domain.triage.route_page`). Assumption, stated plainly
-    rather than silently picked: the PRD's exact definition of "processed"
-    for FR-ANL-01 is not available in this session (the PRD is supplied
-    out of band — CLAUDE.md), so "processed" is defined here as "left the
+    """P5-06-fix/FR-ANL-01 — "processed" means every field extracted from
+    the page has reached a terminal decision outcome (`auto_accept`,
+    `audit_sample`, `review`, `conflict`, `outside_calibrated_regime` —
+    `backend.domain.decision.VALID_ROUTING_OUTCOMES`), not "triage routed
+    it." The original P5-06 session fired this from
+    `backend.domain.triage.route_page` (envelope pinned + routing
+    decision made) — flagged there as an assumption ("left the
     acquisition band with a pinned envelope and a routing decision," the
-    nearest unambiguous pipeline milestone this backend already owns.
-    Confirm against the PRD's own FR-ANL-01 wording before treating this
-    figure as final."""
+    PRD's own FR-ANL-01 wording wasn't available in that session) and
+    now settled: triage merely enqueues a page for extraction, nothing
+    about the page's *content* has been decided at that point, so that
+    placement made "processed" run ahead of the real backlog. The call
+    site moved to `backend.domain.page_lifecycle.mark_processed_if_terminal`,
+    invoked from `backend.domain.decision.route()` after every one of its
+    five outcome branches — see that module's docstring for the
+    replay-guard (fires exactly once per page) and the terminal-outcome
+    check itself. This function's own job is unchanged: append the one
+    `page.processed` entry once the caller has confirmed the page is
+    actually terminal — it does not itself check anything."""
     chain_append(
-        session, actor="system:triage", action="page.processed", subject=page_id,
+        session, actor="system:decision-engine", action="page.processed", subject=page_id,
         shard_key=shard_key_for_record(district=district) if district else None, district=district,
     )
 

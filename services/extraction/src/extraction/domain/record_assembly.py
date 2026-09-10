@@ -122,10 +122,8 @@ def assemble_multi_page_record(
         if meta.get("is_carried_forward") or meta.get("page_role") == "carried_forward":
             is_carried_forward = True
 
-        if prev_index is not None and idx is not None:
-            if idx > prev_index + 1:
-                for missing in range(prev_index + 1, idx):
-                    missing_page_indices.append(missing)
+        if prev_index is not None and idx is not None and idx > prev_index + 1:
+            missing_page_indices.extend(range(prev_index + 1, idx))
         if idx is not None:
             prev_index = idx
 

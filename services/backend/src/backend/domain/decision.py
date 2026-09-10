@@ -84,6 +84,17 @@ def route(session: Session, extraction_id: str, *, novelty_cluster_id: str | Non
         session, actor="system:decision-engine", action=f"decision.route.{outcome}", subject=extraction.id,
     )
     session.flush()
+
+    # P5-06-fix/FR-ANL-01 — "processed" means every field on the page has
+    # reached a terminal decision outcome, checked (and, if true, emitted
+    # exactly once) right here, not at triage-routing time. See
+    # `backend.domain.page_lifecycle`'s module docstring. Imported locally
+    # — `page_lifecycle` imports `VALID_ROUTING_OUTCOMES` from this
+    # module, so a top-level import here would be circular.
+    from backend.domain.page_lifecycle import mark_processed_if_terminal
+
+    mark_processed_if_terminal(session, extraction.page_id)
+
     return result
 
 

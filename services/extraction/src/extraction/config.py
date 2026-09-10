@@ -1,9 +1,13 @@
 """Reads config (unit tables, gazetteer closed sets) from Suchit's Config Service (FR-CFG-02)."""
 from __future__ import annotations
 
+import logging
 import os
+
 import httpx
 from observability import ConfigClient
+
+logger = logging.getLogger(__name__)
 
 BACKEND_URL = os.environ.get("BACKEND_URL", "http://localhost:8000")
 
@@ -16,7 +20,7 @@ def _fetch_over_http(scope: str, key: str) -> dict:
         if response.status_code == 200:
             return response.json()
     except Exception:
-        pass
+        logger.warning("Config Service fetch failed for %s/%s; falling back to default", scope, key, exc_info=True)
     # Fallback default configuration if config service endpoint is unavailable
     return {"scope": scope, "key": key, "value": "default"}
 

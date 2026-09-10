@@ -14,9 +14,6 @@ from landoutbox import write as outbox_write
 from observability.envelope import emit
 from sqlalchemy.orm import Session
 
-from backend.domain.audit_log import record_page_processed
-from backend.models.entities import Batch, Page, SourceDocument
-
 ResolveModelVersions = Callable[[], dict[str, str]]
 
 
@@ -62,7 +59,6 @@ def route_page(
     first is what avoids the pointless registry round-trip on a replay.
     """
     envelope = find_by_page(session, page_id)
-    newly_pinned = envelope is None
     if envelope is None:
         envelope = pin(
             session,
@@ -86,20 +82,12 @@ def route_page(
         outbox_write(session, queue=queue_name, envelope=envelope_msg)
         queued.append(queue_name)
 
-    # P5-06/FR-ANL-01 — "processed" is defined here as "left the
-    # acquisition band with a pinned envelope and a routing decision";
-    # see backend.domain.audit_log.record_page_processed's docstring for
-    # why this specific definition and not another. Fired only on the
-    # genuinely-first routing (`newly_pinned`), never on a
-    # redelivered/replayed message for a page already pinned — the same
-    # idempotency guarantee `pin()` itself gives the envelope applies
-    # here, or a redelivery would double-count this page as "processed"
-    # twice on the dashboard.
-    if newly_pinned:
-        page = session.get(Page, page_id)
-        doc = session.get(SourceDocument, page.document_id) if page is not None else None
-        batch = session.get(Batch, doc.batch_id) if doc is not None else None
-        record_page_processed(session, page_id=page_id, district=batch.district if batch is not None else None)
+    # P5-06-fix/FR-ANL-01 — "processed" no longer fires here. `route_page`
+    # is routing (envelope pinned, enqueued for extraction), not a
+    # decision about the page's content — see `backend.domain.audit_log
+    # .record_page_processed`'s docstring for the settled definition and
+    # `backend.domain.page_lifecycle` for where `page.processed` actually
+    # fires now (the decision engine, once every field is terminal).
 
     return envelope, queued
 
