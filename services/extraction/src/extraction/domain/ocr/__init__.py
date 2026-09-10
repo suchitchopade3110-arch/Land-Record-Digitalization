@@ -8,7 +8,7 @@ from .normalization import get_unconstrained_value, normalize_text
 from .pipeline import process_page_text, process_page_text_with_relationships
 from .region_router import LogicalRegion, LogicalRoute, PageRoutingPlan, RegionDispatcher, RegionRouter
 from .relationship_extractor import OwnerParcelShareBinding, extract_relationships
-from .table_extractor import extract_table_cells
+from .table_extractor import RuledTableExtractor, TableCell, TableStructure, extract_table_cells
 
 __all__ = [
     "BaiduUnlimitedOCRAdapter",
@@ -23,6 +23,9 @@ __all__ = [
     "PageRoutingPlan",
     "RegionDispatcher",
     "RegionRouter",
+    "RuledTableExtractor",
+    "TableCell",
+    "TableStructure",
     "extract_fields_for_doctype",
     "extract_relationships",
     "extract_table_cells",
