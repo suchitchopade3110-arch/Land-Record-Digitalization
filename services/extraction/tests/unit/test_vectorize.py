@@ -6,6 +6,7 @@ from extraction.domain.vectorize import bind_survey_labels, compute_area, vector
 
 def test_vectorize_parcels_geojson_polygon():
     georef = GeoreferenceResult(
+        page_id="page-1",
         transform_matrix=[1.0, 0.0, 500000.0, 0.0, 1.0, 3000000.0],
         transform_type="affine",
         rmse=0.5,
@@ -33,6 +34,7 @@ def test_vectorize_parcels_geojson_polygon():
 
 def test_bind_survey_labels_point_in_polygon():
     georef = GeoreferenceResult(
+        page_id="page-1",
         transform_matrix=[1.0, 0.0, 0.0, 0.0, 1.0, 0.0],
         transform_type="affine",
         rmse=0.2,

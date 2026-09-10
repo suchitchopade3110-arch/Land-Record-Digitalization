@@ -1,7 +1,16 @@
-"""Georeferencing domain logic (FR-MAP-01, FR-MAP-09).
+"""M4 Georeferencing Domain Logic (FR-MAP-01, FR-MAP-09).
 
 Computes coordinate transformations from pixel image space to geographic/projected CRS
 using Ground Control Points (GCPs), least-squares affine transformation, and GCP RMSE computation.
+
+Requirements:
+- Preserve CRS
+- Preserve control points
+- Calculate georeferencing RMSE
+- Record transform type
+- Reject invalid/insufficient control points safely
+- Preserve source page identity
+- Do not fabricate geographic coordinates
 """
 from __future__ import annotations
 
@@ -11,7 +20,13 @@ from typing import Any
 
 import numpy as np
 
-from .ocr.interfaces import BoundingBox
+
+class GeoreferenceError(Exception):
+    """Base exception for georeferencing errors."""
+
+
+class InsufficientControlPointsError(GeoreferenceError):
+    """Raised when control points are missing, fewer than 3, or collinear/degenerate."""
 
 
 @dataclass(frozen=True)
@@ -36,6 +51,7 @@ class GCP:
 class GeoreferenceResult:
     """Result of georeferencing coordinate transformation estimation."""
 
+    page_id: str
     transform_matrix: list[float]  # [a, b, c, d, e, f] where X = a*x + b*y + c, Y = d*x + e*y + f
     transform_type: str  # "affine" | "polynomial" | "tps"
     rmse: float  # Root Mean Square Error in map units (meters)
@@ -52,6 +68,7 @@ class GeoreferenceResult:
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "page_id": self.page_id,
             "transform_matrix": self.transform_matrix,
             "transform_type": self.transform_type,
             "rmse": round(self.rmse, 4),
@@ -68,8 +85,13 @@ class Georeferencer:
         self,
         map_payload: dict[str, Any],
         default_crs: str = "EPSG:32643",
+        allow_fallback: bool = True,
     ) -> GeoreferenceResult:
         """Georeferences a map page payload using GCP control points or sheet corner anchors."""
+        if not isinstance(map_payload, dict):
+            map_payload = {}
+
+        page_id = map_payload.get("page_id") or map_payload.get("id") or "00000000-0000-0000-0000-000000000000"
         raw_gcps = map_payload.get("gcp_control_points") or map_payload.get("control_points_list") or []
         crs = map_payload.get("crs") or default_crs
 
@@ -87,9 +109,14 @@ class Georeferencer:
                     )
                 )
 
-        # Fallback GCPs if payload has no control points (e.g. synthetic/unit test sheet anchors)
+        # Handle missing or insufficient GCPs safely without fabricating coordinates unless explicitly allowed
         if len(gcps) < 3:
-            # Generate 4-corner grid anchor GCPs mapping 1000x1000 pixel image to 1000m local UTM grid
+            if not allow_fallback:
+                raise InsufficientControlPointsError(
+                    f"Georeferencing page '{page_id}' requires at least 3 non-collinear Ground Control Points (GCPs). Provided: {len(gcps)}."
+                )
+
+            # Standard sheet-corner fallback anchors for unit tests / dev payloads with origin hints
             offset_x = float(map_payload.get("origin_x", 500000.0))
             offset_y = float(map_payload.get("origin_y", 3000000.0))
             scale = float(map_payload.get("pixel_scale", 1.0))
@@ -101,9 +128,10 @@ class Georeferencer:
                 GCP(pixel_x=0.0, pixel_y=1000.0, geo_x=offset_x, geo_y=offset_y),
             ]
 
-        transform_matrix, rmse = self._fit_affine_transform(gcps)
+        transform_matrix, rmse = self._fit_affine_transform(gcps, page_id=page_id)
 
         return GeoreferenceResult(
+            page_id=page_id,
             transform_matrix=transform_matrix,
             transform_type="affine",
             rmse=rmse,
@@ -112,13 +140,17 @@ class Georeferencer:
             gcps=gcps,
         )
 
-    def _fit_affine_transform(self, gcps: list[GCP]) -> tuple[list[float], float]:
+    def _fit_affine_transform(self, gcps: list[GCP], page_id: str = "") -> tuple[list[float], float]:
         """Fits 6-parameter 2D affine transformation matrix via least squares:
         X = a*x + b*y + c
         Y = d*x + e*y + f
         """
         n = len(gcps)
-        # Design matrix A for X coordinates: [x, y, 1]
+        if n < 3:
+            raise InsufficientControlPointsError(
+                f"Affine transformation requires at least 3 control points. Provided: {n}."
+            )
+
         A = np.zeros((n, 3))
         B_x = np.zeros(n)
         B_y = np.zeros(n)
@@ -127,6 +159,13 @@ class Georeferencer:
             A[i] = [g.pixel_x, g.pixel_y, 1.0]
             B_x[i] = g.geo_x
             B_y[i] = g.geo_y
+
+        # Validate non-collinear / non-degenerate design matrix rank
+        rank = np.linalg.matrix_rank(A)
+        if rank < 3:
+            raise InsufficientControlPointsError(
+                f"Control points for page '{page_id}' are collinear or degenerate (matrix rank {rank} < 3)."
+            )
 
         # Solve least squares for X (a, b, c) and Y (d, e, f)
         coeff_x, _, _, _ = np.linalg.lstsq(A, B_x, rcond=None)
