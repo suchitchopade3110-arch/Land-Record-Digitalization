@@ -88,6 +88,9 @@ jobs:
       - name: Run the fake end-to-end pipeline run (tests/e2e)
         run: pytest tests/e2e -v
 
+      - name: Run driver conformance suite (T1.c — every QueuePort driver + the canonical fake)
+        run: pytest tests/queue -v
+
       - name: Run per-service contract tests
         run: |
           for svc in backend extraction validation modelwork; do

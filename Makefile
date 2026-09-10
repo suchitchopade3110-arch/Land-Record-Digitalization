@@ -77,7 +77,10 @@ test-e2e: ## The fake end-to-end pipeline run (Phase 1 gate) — real Postgres +
 test-libs: ## Each lib's own unit/integration tests (isolated on $LIB_TEST_DATABASE_URL — never $TEST_DATABASE_URL, see libs/audit/tests/test_chain.py's docstring).
 	LIB_TEST_DATABASE_URL="$(LIB_TEST_DATABASE_URL)" python -m pytest libs/queue/tests libs/storage/tests libs/masking/tests libs/envelope/tests libs/outbox/tests libs/audit/tests libs/config_client/tests -v
 
-test: test-unit test-libs test-contract test-invariant test-property test-e2e
+test-queue-conformance: ## T1.c — the shared QueuePort suite, parametrized over every driver + the canonical fake (ADR-003 fake/driver parity).
+	python -m pytest tests/queue -v
+
+test: test-unit test-libs test-contract test-invariant test-property test-queue-conformance test-e2e
 
 verify: install lint test-db test ## The Phase 1 gate: schema conformance + a fake end-to-end run (test already includes test-e2e).
 	@echo ""

@@ -55,3 +55,48 @@ implementation of the same port with no caller changes.
   multiple consumer instances is assumed) — a worker that needs a stronger
   guarantee than "at-least-once, per-consumer-group" needs to say so
   explicitly, not assume the broker under the port provides it.
+
+## Amendment (2026) — fake/driver parity is a rule, not an accident
+
+`landconfigclient.subscriber.drain_once` shipped with `block_ms=0`
+documented as "non-blocking," when against the real Redis Streams driver
+`block_ms=0` means `XREADGROUP ... BLOCK 0` — Redis's own syntax for
+"block indefinitely." The bug went untested-and-green because the only
+`QueuePort` fake in the repository at the time (a private `FakeQueue`
+inside `libs/config_client/tests/test_subscriber.py`) ignored `block_ms`
+entirely — `consume()` returned immediately regardless of the argument.
+The fake and the real driver disagreed about a parameter's meaning, and
+nothing ever exercised that disagreement.
+
+**Rule:** any `QueuePort` parameter a real driver treats as load-bearing
+must be honoured by the fake used in tests — not merely accepted in the
+fake's signature. "Load-bearing" means: changing the parameter's value
+changes the real driver's observable behaviour. If a fake accepts a
+parameter but ignores its value, that is the same defect class as not
+accepting it at all, because a test written against the fake proves
+nothing about what happens against the real broker.
+
+**Where this is proven, not assumed:** `tests/queue/test_conformance.py`
+(T1.c, per §2 of the Phase 1 build plan — "Redis and NATS drivers pass
+the identical suite") is the one place this repository asserts driver
+behaviour, and it now includes the canonical fake
+(`landqueue.testing.InMemoryQueue`) as a third parametrized target
+alongside both drivers. A new load-bearing parameter (or a new driver)
+is not "done" until it passes through this suite; a fake gaining a new
+method without a matching conformance assertion is the mechanical
+version of the same silent-drift risk this amendment exists to close.
+
+**Parity audit performed against the fake this amendment replaces**
+(`FakeQueue`, now removed — `landqueue.testing.InMemoryQueue` is its
+replacement, imported by `libs/config_client/tests/test_subscriber.py`
+and exercised directly by T1.c):
+
+| Parameter/behaviour | Old fake | Real drivers | Fixed in `InMemoryQueue`? |
+|---|---|---|---|
+| `block_ms` | Ignored — never waited, at any value | `0` blocks indefinitely (Redis `BLOCK 0`); `N>0` bounds the wait | Yes — real blocking via `threading.Condition`, both cases covered by T1.c |
+| `queue` name | Ignored — one shared list regardless of which queue was named | Each stream is a distinct namespace; two differently-named queues never see each other's messages | Yes — storage keyed per queue name |
+| `group` | Ignored for isolation — `ack` in one group's consume call could remove a message from a *different* group's pending set, since there was only one shared pending list | Consumer groups fan out independently; group A acking never affects group B's view | Yes — cursor and pending-set keyed per `(queue, group)`, covered by T1.c's fan-out test |
+| `delivery_count` | Hardcoded to `1` forever — never reflected an actual redelivery | Tracked per delivered message | Partially — `InMemoryQueue` increments a persistent per-`(queue, group, message)` counter on every delivery. Building T1.c's redelivery test surfaced a genuine, narrower divergence between the two real drivers themselves: Redis's `replay_from` (`XGROUP SETID`) resets the group's delivery-position pointer without incrementing the *already-pending* entry's own counter, so a message re-read after a replay reports `delivery_count == 1` again on Redis, not a higher number — and this is arguably correct, not a defect, given `replay_from`'s stated purpose is FR-TRI-09 replay-*reproducibility* (a replayed message should look like the first run, not a retry). `tests/queue/test_conformance.py`'s redelivery test asserts only what is portably true (the message is redelivered with a well-formed, positive `delivery_count`), documents this driver-specific nuance in its own docstring, and does not force artificial agreement between the fake and Redis on this one point. Genuine crash-then-redeliver `delivery_count` incrementing (no `replay_from` involved) remains Redis-driver-specific, already covered by `libs/queue/tests/test_redis_streams.py`'s own `XPENDING`-based test — there is no portable way to force that exact scenario through `QueuePort` alone, because neither concrete driver actually implements the abstract port's stated "or, if none, this consumer's own previously-delivered-but-unacked" fallback (both simplify to "only genuinely new entries," a divergence from the abstract docstring each driver already documents at its own call site, not something this amendment discovered). |
+
+No other parameter or behaviour was found silently diverging between the
+fake and the real drivers as of this audit.

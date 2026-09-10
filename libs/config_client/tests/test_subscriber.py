@@ -2,45 +2,25 @@
 own tests assume — a `QueuePort` conformance-shaped fake (ADR-003), not a
 live broker, matching how `libs/outbox/tests/test_relay.py` tests its
 relay against the port rather than a real Redis/NATS.
+
+Uses `landqueue.testing.InMemoryQueue`, the one canonical `QueuePort` fake
+this repo maintains (see that module's docstring) — not a private local
+fake. This file used to define its own `FakeQueue`, which silently
+ignored `block_ms` entirely; that gap is exactly how P5-02b's
+`block_ms=0` bug shipped green, and it's why a single, ADR-003-audited
+fake now exists instead of one per test file. `tests/queue/
+test_conformance.py` (T1.c) is what proves `InMemoryQueue` itself behaves
+like the real drivers — this file just uses it.
 """
 from __future__ import annotations
 
 from landconfigclient.client import ConfigClient, _EffectiveCacheEntry
 from landconfigclient.subscriber import QUEUE_NAME, drain_once
-from landqueue.port import QueueMessage, QueuePort
-
-
-class FakeQueue(QueuePort):
-    """In-memory `QueuePort` — just enough of the port for `drain_once`:
-    publish appends, consume drains up to `count` unacked messages, ack
-    removes them from the "in flight" set."""
-
-    def __init__(self):
-        self._pending: list[QueueMessage] = []
-        self._next_seq = 0
-
-    def publish(self, queue: str, message: dict) -> str:
-        self._next_seq += 1
-        seq = str(self._next_seq)
-        self._pending.append(QueueMessage(sequence_id=seq, data=message, delivery_count=1))
-        return seq
-
-    def ensure_group(self, queue: str, group: str, *, start: str = "$") -> None:
-        pass
-
-    def consume(self, queue: str, group: str, consumer_name: str, *, count: int = 1, block_ms: int = 1000):
-        batch = self._pending[:count]
-        return batch
-
-    def ack(self, queue: str, group: str, sequence_id: str) -> None:
-        self._pending = [m for m in self._pending if m.sequence_id != sequence_id]
-
-    def replay_from(self, queue: str, group: str, sequence_id: str) -> None:
-        raise NotImplementedError
+from landqueue.testing import InMemoryQueue
 
 
 def test_drain_once_applies_pending_invalidations_and_acks_them():
-    queue = FakeQueue()
+    queue = InMemoryQueue()
 
     def fetch(scope, key, config_version):
         return {"key": key, "value": {"n": 2}, "config_version": "v2", "effective_from": "2026-02-01T00:00:00+00:00"}
@@ -58,13 +38,13 @@ def test_drain_once_applies_pending_invalidations_and_acks_them():
     processed = drain_once(client, queue, group="shree-extraction", consumer_name="worker-1")
 
     assert processed == 1
-    assert queue._pending == []  # acked
+    assert queue.pending_count(QUEUE_NAME, "shree-extraction") == 0  # acked
     refreshed = client.get("district", "unit_table.sitapur")
     assert refreshed["config_version"] == "v2"
 
 
 def test_drain_once_with_nothing_pending_is_a_noop():
-    queue = FakeQueue()
+    queue = InMemoryQueue()
     client = ConfigClient(fetch=lambda scope, key, cv: {})
 
     assert drain_once(client, queue, group="g", consumer_name="c") == 0
@@ -74,9 +54,11 @@ def test_drain_once_default_does_not_block_forever_against_a_real_broker():
     """P5-02b regression: the old default (`block_ms=0`) meant "block
     indefinitely" against the real Redis Streams driver (`XREADGROUP ...
     BLOCK 0`), the opposite of this function's old "non-blocking" claim —
-    `FakeQueue` above never caught it because it ignores `block_ms`
-    entirely. Skipped if no local Redis; real broker only, since the
-    whole point is proving the real driver's behaviour, not a fake's."""
+    the fake this file used before never caught it because it ignored
+    `block_ms` entirely (see this module's docstring). `InMemoryQueue` now
+    honours `block_ms` too (proven in `tests/queue/test_conformance.py`),
+    but this specific regression is worth proving against the real broker
+    directly, not just the fake — skipped if no local Redis."""
     import os
 
     import pytest
