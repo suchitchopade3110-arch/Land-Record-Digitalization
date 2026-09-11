@@ -12,7 +12,6 @@ import logging
 from typing import Any, Callable
 
 from modelwork.domain.calibration.novelty import (
-    CentroidDistanceNoveltyModel,
     NoveltyDetector,
     NoveltyPolicy,
 )

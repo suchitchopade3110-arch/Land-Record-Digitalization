@@ -23,7 +23,6 @@ from modelwork.domain.calibration.novelty import (
     NoveltyDetector,
     NoveltyPolicy,
 )
-from modelwork.publishers import decision_publisher
 
 try:
     from observability import traced_consumer

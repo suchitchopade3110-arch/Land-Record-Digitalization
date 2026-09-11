@@ -198,8 +198,14 @@ class _MockSession:
 
     def execute(self, query: Any) -> Any:
         class _Result:
+            def scalars(self) -> Any:
+                return self
             def scalar_one_or_none(self) -> Any:
                 return None
+            def first(self) -> Any:
+                return None
+            def all(self) -> list[Any]:
+                return []
         return _Result()
 
 

@@ -15,7 +15,6 @@ against calibrated reference stratum prototypes.
 from __future__ import annotations
 
 import math
-from typing import Any
 
 from modelwork.domain.calibration.novelty import (
     CentroidDistanceNoveltyModel,

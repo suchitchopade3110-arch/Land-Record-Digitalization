@@ -100,9 +100,23 @@ def collect_learning_example(
 
     dist = correction_dict.get("edit_distance")
     if dist is None:
-        # Fallback to computing edit distance if omitted
-        from backend.domain.correction import edit_distance
-        distance = edit_distance(str(predicted), str(corrected))
+        # Fallback to computing edit distance if omitted without cross-service import
+        a, b = str(predicted), str(corrected)
+        if a == b:
+            distance = 0
+        elif not a:
+            distance = len(b)
+        elif not b:
+            distance = len(a)
+        else:
+            prev = list(range(len(b) + 1))
+            for i, ca in enumerate(a, start=1):
+                curr = [i] + [0] * len(b)
+                for j, cb in enumerate(b, start=1):
+                    cost = 0 if ca == cb else 1
+                    curr[j] = min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost)
+                prev = curr
+            distance = prev[-1]
     else:
         if not isinstance(dist, int) or dist < 0:
             raise ValueError(f"edit_distance must be a non-negative integer, got {dist}")
