@@ -62,3 +62,27 @@
 - `tests/queue/test_conformance.py`: 9 passed against `InMemoryQueue` (Redis/NATS skipped if servers not running locally).
 - `infra/docker-compose.yml`: `docker compose config` validates cleanly with all new worker services.
 
+## T1-03 · Decision engine (M2/M12 boundary) — Persistence boundary, replay idempotency, review of PR #10's edit
+
+### 1. Decisions Applied
+- **D1 Persistence model (Option A):**
+  - Upstream owners write their own columns directly to Postgres before publishing to queues.
+  - Specifically: Model Work writes `routing_outcome` and `calibrated_confidence` to `extractions` in PostgreSQL.
+  - The Decision Engine treats the database as the source of truth and does not perform unconditional overwrites from message payloads (reverting PR #10's unconditional write).
+  - If a message payload provides attributes that contradict the database state, `record_payload_mismatch()` logs an audit event (`decision.payload_mismatch` on the system shard with mismatched field names, no PII) and raises `PayloadMismatchError`.
+  - Missing extraction rows fail loudly with `ExtractionNotFoundError` (inherits `KeyError`).
+  - Migration `0010_decision_record_and_service_roles.py` defines per-service Postgres roles (`modelwork_role`, `extraction_role`, `validation_role`, `backend_role`) with column-level grants enforcing column ownership boundaries.
+- **D2 Decision idempotency:**
+  - `decision_record` table created with a unique constraint on `extraction_id` (`id`, `extraction_id`, `outcome`, `envelope_id`, `decided_at`).
+  - A redelivery/replay of a decision message for an already-decided extraction returns the stored outcome deterministically without creating duplicate `ReviewTask`, `Conflict`, `AuditSample`, `OperationalAlert`, or audit entries.
+  - If a replayed message carries a conflicting `routing_outcome` for an already-decided extraction, `AlreadyDecidedWithDifferentOutcome` is raised without mutating state.
+
+### 2. Verification
+- `tests/contract/test_decision_engine_boundary.py`:
+  - `test_decision_replay_is_idempotent`: Verifies identical redeliveries result in exactly 1 `ReviewTask`, 1 `decision_record`, and 1 `AuditEntry`.
+  - `test_changed_outcome_for_already_decided_extraction_is_rejected`: Verifies changing outcome on an already-decided extraction raises `AlreadyDecidedWithDifferentOutcome`.
+  - `test_payload_db_mismatch_is_rejected_with_audit_and_no_overwrite`: Verifies payload vs DB conflicts log `decision.payload_mismatch` and preserve DB integrity.
+  - `test_missing_extraction_row_raises_typed_error`: Verifies missing row raises `ExtractionNotFoundError`.
+  - `test_service_db_roles_and_column_level_grants`: Verifies PostgreSQL role grants prevent unauthorized column updates across service boundaries.
+- Database migration `0010_decision_record_and_service_roles.py` created and verified.
+

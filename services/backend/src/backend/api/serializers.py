@@ -25,13 +25,13 @@ class ReviewTaskPublicView(BaseModel):
 
     id: str
     extraction_id: str
-    reason: str | None
-    assignee: str | None
-    opened_at: str
-    closed_at: str | None
-    cluster_id: str | None
-    cluster_size: int | None
-    hour_into_session: int | None
+    reason: str | None = None
+    assignee: str | None = None
+    opened_at: str | None = None
+    closed_at: str | None = None
+    cluster_id: str | None = None
+    cluster_size: int | None = None
+    hour_into_session: int | None = None
 
 
 def strip_review_task_internals(review_task: Any) -> ReviewTaskPublicView:
