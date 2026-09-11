@@ -13,6 +13,7 @@ Covers:
 """
 from __future__ import annotations
 
+import io
 import os
 import signal
 import threading
@@ -23,6 +24,7 @@ from unittest.mock import MagicMock
 
 import pytest
 import redis
+from pypdf import PdfWriter
 from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -151,7 +153,11 @@ def test_crash_between_commit_and_ack_is_idempotent_ingestion(queue_driver, sess
     consumer_name = "ingest-c1"
 
     store = LocalFsObjectStore(tmp_path)
-    doc_bytes = b"%PDF-1.4 1 0 obj\n<< /Type /Catalog >>\nendobj\n"  # minimal or single-page
+    writer = PdfWriter()
+    writer.add_blank_page(width=200, height=300)
+    pdf_buf = io.BytesIO()
+    writer.write(pdf_buf)
+    doc_bytes = pdf_buf.getvalue()  # a real single-page PDF — pypdf needs a valid page tree/xref
     put_res = store.put(doc_bytes)
 
     with session_factory() as session:
@@ -341,6 +347,20 @@ def test_two_relay_loops_drain_outbox_without_duplicates(queue_driver, session_f
     """
     outbox_queue_name = f"RELAY_TEST_QUEUE-{uuid.uuid4()}"
     num_messages = 20
+
+    # This module's other tests write real OutboxMessage rows (via
+    # outbox_write(), inside ingestion_handle/triage_handle) against this
+    # same shared `outbox_message` table and never drain them — they only
+    # assert against the domain rows those tests care about. Relay.drain_once()
+    # intentionally scans the whole table regardless of queue (that's its
+    # real job), so any such leftovers would otherwise be swept up by this
+    # test's own relays and inflate the dispatched count below. Clear them
+    # first so the count is about this test's own 20 messages only.
+    with session_factory() as session:
+        session.query(OutboxMessage).filter(OutboxMessage.dispatched.is_(False)).update(
+            {"dispatched": True}, synchronize_session=False
+        )
+        session.commit()
 
     with session_factory() as session:
         for i in range(num_messages):

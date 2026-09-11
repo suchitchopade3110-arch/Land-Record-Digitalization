@@ -12,12 +12,12 @@ import time
 from collections.abc import Callable
 from typing import Any
 
+from landoutbox.relay import Relay
+from landqueue.port import QueuePort
 from sqlalchemy.orm import Session, sessionmaker
 
 from backend.domain.audit_log import record_dead_lettered
 from backend.domain.queue_policy import QueuePolicy, get_queue_policy
-from landoutbox.relay import Relay
-from landqueue.port import QueuePort
 
 logger = logging.getLogger(__name__)
 
@@ -153,7 +153,7 @@ class WorkerRunner:
                 break
             try:
                 self.run_once()
-            except Exception:
+            except Exception:  # noqa: BLE001 — the loop must survive any handler/driver failure; run_once already logged and rolled back
                 logger.warning("Error during worker execution cycle, continuing loop")
             iterations += 1
 

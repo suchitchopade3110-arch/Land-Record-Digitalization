@@ -25,9 +25,22 @@ class Relay:
 
     def drain_once(self, *, batch_size: int = 100) -> int:
         """Publish up to `batch_size` undispatched messages, oldest first.
-        Returns the count actually dispatched. Each message is published
-        and marked dispatched in its own short transaction, so one
-        message's failure doesn't roll back the others in the batch."""
+        Returns the count actually dispatched.
+
+        The row lock from `FOR UPDATE SKIP LOCKED` is held for the whole
+        batch — through every publish call, not just the SELECT — and
+        released only on commit at the end. Releasing it earlier (so a
+        publish's network latency isn't spent holding a lock) leaves a
+        window between "lock released" and "row marked dispatched" where
+        a second relay instance's SELECT sees the same rows as still
+        `dispatched=False` and unlocked, and republishes them itself —
+        duplicate broker publishes from concurrent relay loops, not just
+        the already-idempotent-downstream redelivery this module's
+        docstring accepts. Holding the lock for the batch's duration is
+        the tradeoff that closes that race without adding a claim/lease
+        column; a crash mid-batch still leaves every unmarked row
+        `dispatched=False` for the next run to pick up (safe, since
+        downstream consumers are already required to be idempotent)."""
         dispatched_count = 0
         with self._session_factory() as session:
             stmt = (
@@ -38,19 +51,11 @@ class Relay:
                 .with_for_update(skip_locked=True)
             )
             pending = session.scalars(stmt).all()
-            message_ids = [m.id for m in pending]
-            queues_and_envelopes = [(m.queue, m.envelope) for m in pending]
-            session.commit()  # release the row lock before the (slower) network publish call
-
-        for message_id, (queue, envelope) in zip(message_ids, queues_and_envelopes):
-            self._queue.publish(queue, envelope)
-            with self._session_factory() as session:
-                row = session.get(OutboxMessage, message_id)
-                if row is None or row.dispatched:
-                    continue  # already handled by a concurrent relay instance
+            for row in pending:
+                self._queue.publish(row.queue, row.envelope)
                 row.dispatched = True
                 row.dispatched_at = datetime.now(timezone.utc)
                 row.dispatch_attempts += 1
-                session.commit()
-            dispatched_count += 1
+                dispatched_count += 1
+            session.commit()
         return dispatched_count
