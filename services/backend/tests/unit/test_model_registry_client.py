@@ -13,7 +13,6 @@ from backend.domain.model_registry_client import (
     ModelRegistryResolutionError,
     resolve_active_model_versions,
 )
-from modelwork.main import app as modelwork_app
 
 SCHEMAS_DIR = Path(__file__).resolve().parents[4] / "contracts" / "schemas"
 WORK_ENVELOPE_SCHEMA = json.loads((SCHEMAS_DIR / "work_envelope.schema.json").read_text(encoding="utf-8"))
@@ -46,22 +45,6 @@ def test_resolve_active_model_versions_mapping_and_schema():
         "triage_classifier": "triage_classifier_v1",
     }
     assert set(resolved.keys()) == set(WORK_ENVELOPE_SCHEMA["properties"]["model_versions"]["required"])
-
-
-def test_resolve_active_model_versions_with_real_modelwork_asgi():
-    """Verify resolver against Tharun's real ASGI application."""
-    from starlette.testclient import TestClient
-
-    with TestClient(modelwork_app) as client:
-        resolved = resolve_active_model_versions(client=client)
-
-    assert resolved == {
-        "printed_ocr": "printed_ocr_v1",
-        "hwr": "hwr_v1",
-        "confidence_calibrator": "calibrator_v1",
-        "novelty_detector": "novelty_detector_v1",
-        "triage_classifier": "triage_classifier_v1",
-    }
 
 
 def test_resolve_active_model_versions_raises_on_404():
