@@ -3,9 +3,15 @@ the review workbench. TODO: FR-LRN-01/07.
 """
 from observability import traced_consumer
 
+from backend.publishers.learning_loop_publisher import (
+    QUEUE_NAME,
+    build_learning_loop_envelope,
+    publish_correction_to_outbox,
+)
+
 
 @traced_consumer
 def handle(message: dict) -> None:
-    # TODO: FR-LRN-07 — tag stream (routed/audit/downstream/legacy_digital)
-    # and compute source_page_digest before publishing.
-    raise NotImplementedError("TODO: FR-LRN-01/07 not implemented")
+    # Consumer handler placeholder for future learning loop consumption
+    raise NotImplementedError("Learning loop queue consumer is owned by downstream learning worker")
+

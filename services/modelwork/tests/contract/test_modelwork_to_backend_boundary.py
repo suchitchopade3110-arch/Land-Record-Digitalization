@@ -188,6 +188,7 @@ class MockSession:
 
 class TestExtractionEntity:
     """Lightweight test extraction entity matching backend Extraction ORM attributes."""
+    __test__ = False
 
     def __init__(
         self,
