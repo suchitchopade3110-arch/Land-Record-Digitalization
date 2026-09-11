@@ -35,6 +35,8 @@ def _make_mock_pkg(name: str) -> MagicMock:
 for _mod in [
     "sqlalchemy",
     "sqlalchemy.orm",
+    "sqlalchemy.dialects",
+    "sqlalchemy.dialects.postgresql",
     "landaudit",
     "structlog",
 ]:

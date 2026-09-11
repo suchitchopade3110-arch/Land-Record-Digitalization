@@ -92,6 +92,17 @@ try:
     import pytest
 except ImportError:
     class _MockPytest:
+        class mark:
+            @staticmethod
+            def skipif(cond: bool, reason: str = "") -> Any:
+                def decorator(fn: Any) -> Any:
+                    def wrapper(*args: Any, **kwargs: Any) -> Any:
+                        if cond:
+                            return None
+                        return fn(*args, **kwargs)
+                    return wrapper
+                return decorator
+
         @staticmethod
         def raises(expected_exception: type[BaseException], match: str | None = None) -> Any:
             class _RaisesContext:

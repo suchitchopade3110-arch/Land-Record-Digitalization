@@ -237,6 +237,8 @@ class EndToEndMockSession:
                 return self._alerts[0] if self._alerts else None
             def first(self) -> Any:
                 return self._alerts[0] if self._alerts else None
+            def all(self) -> list[Any]:
+                return list(self._alerts)
         return ResultWrapper(self.alerts)
 
 
