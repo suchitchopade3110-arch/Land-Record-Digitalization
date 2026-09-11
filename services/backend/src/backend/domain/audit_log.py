@@ -182,3 +182,18 @@ def record_dead_lettered(
         shard_key=SYSTEM_SHARD_KEY,
     )
 
+
+def record_payload_mismatch(
+    session: Session, *, extraction_id: str, field_names: list[str],
+) -> None:
+    """D1-A / T1-03 — payload vs DB mismatch audit entry. No personal data values reach this entry."""
+    chain_append(
+        session,
+        actor="system:decision-engine",
+        action="decision.payload_mismatch",
+        subject=extraction_id,
+        purpose=f"mismatched_fields={','.join(field_names)}",
+        shard_key=SYSTEM_SHARD_KEY,
+    )
+
+

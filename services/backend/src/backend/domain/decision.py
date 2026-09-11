@@ -17,9 +17,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.domain.review_policy import NOVELTY_CLUSTER_ALERT_DEDUP_WINDOW
+import uuid
 from backend.models.entities import (
     AuditSample,
     Conflict,
+    DecisionRecord,
     Extraction,
     OperationalAlert,
     ReviewTask,
@@ -44,30 +46,80 @@ class UnroutableExtraction(ValueError):
     actually matters until Phase 5's DLQ+alert wiring lands."""
 
 
-def route(session: Session, extraction_id: str, *, novelty_cluster_id: str | None = None) -> dict:
+class ExtractionNotFoundError(KeyError):
+    """Raised when the Extraction row does not exist in Postgres."""
+
+
+class PayloadMismatchError(ValueError):
+    """Raised when message payload attributes mismatch DB row attributes (D1-A)."""
+
+
+class AlreadyDecidedWithDifferentOutcome(ValueError):
+    """Raised when an extraction is already decided and a message carries a different outcome (D2)."""
+
+
+def route(
+    session: Session,
+    extraction_id: str,
+    *,
+    novelty_cluster_id: str | None = None,
+    envelope_id: str | None = None,
+) -> dict:
     """Dispatch on `Extraction.routing_outcome` (already set upstream by
     Tharun's M8). Returns a small dict describing what was created, for
     the caller (the queue worker) to log/publish onward. Every branch
     writes an audit event — FR-PUB-03 covers every automated decision,
     not just human ones.
 
-    `novelty_cluster_id`: P3-02/FR-CNF-14's cluster identity, supplied by
-    Tharun's novelty engine. There is no `contracts/` field for this yet
-    — `Extraction.novelty_score` is a per-field score, not a cluster
-    handle, and adding one is exactly the kind of `contracts/` edit
-    CLAUDE.md says to raise, not make. Until that lands, a caller with a
-    real cluster id passes it explicitly (a fixture-backed fake stands in
-    where nothing produces one yet, per PHASE3.md); omitting it falls
-    back to `extraction_id` itself, i.e. every novel field is its own
-    singleton cluster — degrades to "one alert per field" rather than
-    silently merging unrelated novel pages into one cluster.
+    Idempotent per D2: exactly one terminal decision per extraction_id,
+    guaranteed by unique constraint on decision_record. A replay returns
+    the stored result without creating new tasks, conflicts, alerts, or audit entries.
     """
     extraction = session.get(Extraction, extraction_id)
     if extraction is None:
-        raise KeyError(f"no Extraction with id={extraction_id!r}")
+        raise ExtractionNotFoundError(f"no Extraction with id={extraction_id!r}")
+
     outcome = extraction.routing_outcome
     if outcome not in VALID_ROUTING_OUTCOMES:
         raise UnroutableExtraction(f"Extraction {extraction_id} has routing_outcome={outcome!r}")
+
+    # Check if already decided (D2 replay idempotency)
+    existing_decision = session.execute(
+        select(DecisionRecord).where(DecisionRecord.extraction_id == extraction_id)
+    ).scalar_one_or_none()
+
+    if existing_decision is not None and isinstance(existing_decision, DecisionRecord):
+        if existing_decision.outcome != outcome:
+            raise AlreadyDecidedWithDifferentOutcome(
+                f"Extraction {extraction_id} was already decided as {existing_decision.outcome!r}, cannot change to {outcome!r}"
+            )
+        # Idempotent replay: return stored representation without side effects
+        if outcome == "auto_accept":
+            return {"outcome": "auto_accept", "extraction_id": extraction.id, "replayed": True}
+        if outcome == "review":
+            task = session.execute(select(ReviewTask).where(ReviewTask.extraction_id == extraction_id)).scalar_one_or_none()
+            return {"outcome": "review", "review_task_id": task.id if task else None, "replayed": True}
+        if outcome == "audit_sample":
+            task = session.execute(select(ReviewTask).where(ReviewTask.extraction_id == extraction_id)).scalar_one_or_none()
+            sample = session.execute(select(AuditSample).where(AuditSample.extraction_id == extraction_id)).scalar_one_or_none()
+            return {
+                "outcome": "audit_sample",
+                "review_task_id": task.id if task else None,
+                "audit_sample_id": sample.id if sample else None,
+                "replayed": True,
+            }
+        if outcome == "conflict":
+            conflict = session.execute(select(Conflict).where(Conflict.records.contains([extraction_id]))).scalar_one_or_none()
+            return {"outcome": "conflict", "conflict_id": conflict.id if conflict else None, "replayed": True}
+        # outside_calibrated_regime
+        alert = session.execute(select(OperationalAlert).where(OperationalAlert.extraction_ids.contains([extraction_id]))).scalar_one_or_none()
+        return {
+            "outcome": "outside_calibrated_regime",
+            "extraction_id": extraction.id,
+            "alert_id": alert.id if alert else None,
+            "deduplicated": True,
+            "replayed": True,
+        }
 
     if outcome == "auto_accept":
         result = _auto_accept(session, extraction)
@@ -79,6 +131,16 @@ def route(session: Session, extraction_id: str, *, novelty_cluster_id: str | Non
         result = _open_conflict_placeholder(session, extraction)
     else:  # outside_calibrated_regime
         result = _outside_calibrated_regime(session, extraction, novelty_cluster_id or extraction.id)
+
+    # Persist decision record in the same transaction (D2)
+    dec_rec = DecisionRecord(
+        id=str(uuid.uuid4()),
+        extraction_id=extraction.id,
+        outcome=outcome,
+        envelope_id=envelope_id,
+        decided_at=datetime.now(timezone.utc),
+    )
+    session.add(dec_rec)
 
     audit_append(
         session, actor="system:decision-engine", action=f"decision.route.{outcome}", subject=extraction.id,
