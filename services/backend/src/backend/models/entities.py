@@ -396,6 +396,23 @@ class Correction(Base):
         ),
     )
 
+    def to_contract_dict(self) -> dict:
+        """The exact shape contracts/schemas/correction.schema.json requires — what gets attached to LEARNING_LOOP_QUEUE."""
+        return {
+            "id": self.id,
+            "extraction_id": self.extraction_id,
+            "crop_uri": self.crop_uri,
+            "predicted": self.predicted or "",
+            "corrected": self.corrected or "",
+            "edit_distance": self.edit_distance if self.edit_distance is not None else 0,
+            "actor": self.actor,
+            "model_version": self.model_version or "",
+            "config_version": self.config_version or "",
+            "stream": self.stream,
+            "source_page_digest": self.source_page_digest,
+            "reliability_weight": self.reliability_weight,
+        }
+
 
 class ModelVersion(Base):
     __tablename__ = "model_version"

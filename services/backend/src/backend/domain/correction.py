@@ -21,6 +21,8 @@ from backend.domain.review_policy import (
     MAKER_CHECKER_FIELD_CLASSES,
 )
 from backend.models.entities import Correction, Extraction, Page, PendingCorrection
+from backend.publishers.learning_loop_publisher import publish_correction_to_outbox
+
 
 
 class SameActorCannotConfirm(ValueError):
@@ -66,13 +68,21 @@ def source_page_digest_for(page: Page) -> str:
 
 
 def submit_correction(
-    session: Session, *, extraction: Extraction, corrected: str, actor: str, stream: str
+    session: Session,
+    *,
+    extraction: Extraction,
+    corrected: str,
+    actor: str,
+    stream: str,
+    reliability_weight: float | None = None,
+    producer: str = "review",
+    publish_to_outbox: bool = True,
 ) -> Correction | PendingCorrection:
     """FR-LRN-01/07 — write the correction. FR-REV-12 — if the field is a
     maker-checker class and the edit distance exceeds the configured
     threshold, land it in `PendingCorrection` instead of `Correction`
     (never both): the record is durable, but not yet a `Correction`, and
-    is therefore structurally absent from Tharun's training-store read
+    is therefore structurally absent from the training-store read
     contract (which only ever queries `correction`) until a second actor
     confirms it.
     """
@@ -99,6 +109,7 @@ def submit_correction(
             config_version=extraction.config_version,
             stream=stream,
             source_page_digest=digest,
+            state="pending",
         )
         session.add(pending)
         session.flush()
@@ -119,14 +130,24 @@ def submit_correction(
         config_version=extraction.config_version,
         stream=stream,
         source_page_digest=digest,
+        reliability_weight=reliability_weight,
     )
     session.add(correction)
     session.flush()
     audit_append(session, actor=actor, action="correction.submitted", subject=extraction.id, purpose="review_submit")
+    if publish_to_outbox:
+        publish_correction_to_outbox(session, correction, extraction=extraction, producer=producer)
     return correction
 
 
-def confirm_pending_correction(session: Session, pending_id: str, *, actor: str) -> Correction:
+def confirm_pending_correction(
+    session: Session,
+    pending_id: str,
+    *,
+    actor: str,
+    producer: str = "review",
+    publish_to_outbox: bool = True,
+) -> Correction:
     """FR-REV-12 — the second, distinct actor's action. Only now does a
     real `Correction` row exist; only from this point on is the edit
     visible to the publish path or the training-store read contract."""
@@ -151,6 +172,7 @@ def confirm_pending_correction(session: Session, pending_id: str, *, actor: str)
         config_version=pending.config_version,
         stream=pending.stream,
         source_page_digest=pending.source_page_digest,
+        reliability_weight=None,
     )
     session.add(correction)
     session.flush()
@@ -165,4 +187,6 @@ def confirm_pending_correction(session: Session, pending_id: str, *, actor: str)
         session, actor=actor, action="correction.confirmed",
         subject=pending.extraction_id, purpose="maker_checker_confirm",
     )
+    if publish_to_outbox:
+        publish_correction_to_outbox(session, correction, extraction=None, producer=producer)
     return correction
