@@ -14,14 +14,20 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from landaudit import append as audit_append
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.domain.review_policy import (
     MAKER_CHECKER_EDIT_DISTANCE_THRESHOLD,
     MAKER_CHECKER_FIELD_CLASSES,
 )
-from backend.models.entities import Correction, Extraction, Page, PendingCorrection, ReviewTask
-from sqlalchemy import select
+from backend.models.entities import (
+    Correction,
+    Extraction,
+    Page,
+    PendingCorrection,
+    ReviewTask,
+)
 
 
 class SameActorCannotConfirm(ValueError):
