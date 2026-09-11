@@ -8,7 +8,8 @@ DecisionEnvelope onto DECISION_QUEUE for Backend Decision Engine consumption
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from modelwork.domain.calibration.calibrator import (
     CalibratorModel,
@@ -105,7 +106,7 @@ def handle(
 
     payload = message["payload"]
     if not isinstance(payload, dict):
-        raise ValueError("payload must be a dictionary")
+        raise ValueError("payload must be a dictionary")  # noqa: TRY004
 
     validation_results = payload.get("validation_results")
     if validation_results is None or not isinstance(validation_results, list):
@@ -170,7 +171,7 @@ def handle(
             if ext_obj is None:
                 try:
                     ext_obj = session.get("Extraction", ext_id)
-                except Exception:
+                except Exception:  # noqa: BLE001
                     ext_obj = None
 
         if ext_obj is None:
@@ -196,12 +197,12 @@ def handle(
             if Page is not None:
                 try:
                     page_obj = session.get(Page, page_id)
-                except Exception:
+                except Exception:  # noqa: BLE001
                     page_obj = None
             if page_obj is None:
                 try:
                     page_obj = session.get("Page", page_id)
-                except Exception:
+                except Exception:  # noqa: BLE001
                     page_obj = None
 
             if page_obj is not None:
@@ -229,7 +230,7 @@ def handle(
         # 5. Execute decision flow: Novelty FIRST -> Stratum Calibration -> Posture Evaluation
         should_publish_internally = publish_to_queue and (publisher is None)
 
-        updated_ext, calib_res, published_envelope = process_extraction_for_decision(
+        updated_ext, _calib_res, published_envelope = process_extraction_for_decision(
             extraction=ext_dict,
             work_envelope=work_envelope,
             calibrator=active_calibrator,
@@ -275,7 +276,7 @@ def handle(
     if session is not None and hasattr(session, "flush"):
         try:
             session.flush()
-        except Exception:
+        except Exception:  # noqa: BLE001, S110
             pass
 
     return {

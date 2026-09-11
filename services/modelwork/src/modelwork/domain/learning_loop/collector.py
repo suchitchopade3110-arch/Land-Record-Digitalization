@@ -52,9 +52,10 @@ class LearningExample:
             )
         if self.edit_distance < 0:
             raise ValueError(f"edit_distance must be non-negative, got {self.edit_distance}")
-        if self.reliability_weight is not None:
-            if not math.isfinite(self.reliability_weight) or self.reliability_weight < 0.0:
-                raise ValueError(f"reliability_weight must be a non-negative finite real, got {self.reliability_weight}")
+        if self.reliability_weight is not None and (
+            not math.isfinite(self.reliability_weight) or self.reliability_weight < 0.0
+        ):
+            raise ValueError(f"reliability_weight must be a non-negative finite real, got {self.reliability_weight}")
 
 
 def collect_learning_example(

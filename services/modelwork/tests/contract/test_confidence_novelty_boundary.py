@@ -144,6 +144,7 @@ from backend.workers.decision_engine import handle as decision_engine_handle
 
 class TestExtractionEntity:
     """Concrete Extraction entity for end-to-end integration tests."""
+    __test__ = False
 
     def __init__(
         self,

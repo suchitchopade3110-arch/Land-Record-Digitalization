@@ -17,8 +17,9 @@ NON-NEGOTIABLE SAFETY:
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Protocol
+from typing import Any, Protocol
 
 # Authoritative enums strictly mirrored from contracts/schemas/page.schema.json
 VALID_DOC_TYPES: frozenset[str] = frozenset({

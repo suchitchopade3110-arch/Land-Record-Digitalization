@@ -9,7 +9,8 @@ DO NOT publish directly to TEXT_QUEUE or MAP_QUEUE (Backend owns downstream rout
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from modelwork.domain.calibration.novelty import (
     NoveltyDetector,
@@ -97,7 +98,7 @@ def handle(
 
     payload = message.get("payload")
     if not isinstance(payload, dict):
-        raise ValueError("Message missing dictionary 'payload'")
+        raise ValueError("Message missing dictionary 'payload'")  # noqa: TRY004
 
     page_id = payload.get("id")
     document_id = payload.get("document_id")
@@ -123,7 +124,7 @@ def handle(
             if page_entity is not None and getattr(page_entity, "storage_uri", None):
                 store = get_store()
                 page_image = store.get(page_entity.storage_uri)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             logger.debug("Could not hydrate image from session/storage: %s", exc)
 
     # 2. Run Legibility Scorer (FR-TRI-01, FR-TRI-10)
@@ -168,7 +169,7 @@ def handle(
                 )
                 if existing_task is None:
                     open_from_threshold_breach(session, page_id=page_id, reason_code=reason)
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 logger.warning("Failed to record RescanTask via session: %s", exc)
 
     # 7. Compute optional route list per FR-TRI-05
@@ -208,7 +209,7 @@ def handle(
                 db_page.novelty_score = novelty_score
                 db_page.route = routes
                 session.flush()
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             logger.debug("Could not flush classified Page to DB: %s", exc)
 
     # 10. Publish outbound envelope to TRIAGE_QUEUE with producer="triage"
@@ -224,7 +225,7 @@ def handle(
             from landoutbox import write as outbox_write
 
             outbox_write(session, queue="TRIAGE_QUEUE", envelope=outbound)
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             logger.debug("Could not write outbox message: %s", exc)
 
     if publisher is not None:

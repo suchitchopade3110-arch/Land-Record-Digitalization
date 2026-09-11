@@ -17,8 +17,9 @@ NON-NEGOTIABLE SAFETY:
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Literal, Protocol
+from typing import Any, Literal, Protocol
 
 LegibilityBand = Literal["good", "marginal", "poor"]
 VALID_LEGIBILITY_BANDS: frozenset[str] = frozenset({"good", "marginal", "poor"})
