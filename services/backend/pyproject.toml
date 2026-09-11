@@ -21,6 +21,7 @@ dependencies = [
   "landconfigclient",
   "pypdf>=4.0",   # FR-ING-03 — PDF page-tree splitting (structural, not OCR)
   "pillow>=10.0", # FR-ING-03/FR-TRI-06 — multi-frame TIFF splitting + off-the-shelf preprocessing ops
+  "httpx>=0.27",  # FR-TRI-09/FR-LRN-04 — backend.domain.model_registry_client's Model Registry HTTP client
 ]
 
 [build-system]

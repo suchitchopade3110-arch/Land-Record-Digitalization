@@ -37,5 +37,4 @@ def handle(message: dict, session: Session) -> dict:
         page_role=payload["page_role"],
         config_version=payload.get("config_version", "unversioned"),
     )
-    session.commit()
     return {"envelope_id": envelope.envelope_id, "queued_to": queued_to}

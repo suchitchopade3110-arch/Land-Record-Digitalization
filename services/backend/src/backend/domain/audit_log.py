@@ -167,3 +167,33 @@ def record_field_edit(
         value_hash=hash_value(combined, purpose="field_edit_history"),
         shard_key=shard_key_for_record(district=district) if district else None,
     )
+
+
+def record_dead_lettered(
+    session: Session, *, queue: str, message_id: str, delivery_count: int, error_class: str,
+) -> None:
+    """D1 / FR-PUB-03 — dead-letter audit entry. No personal data values reach this entry."""
+    chain_append(
+        session,
+        actor="system:worker-runner",
+        action="queue.dead_lettered",
+        subject=f"{queue}:{message_id}",
+        purpose=f"delivery_count={delivery_count}:error={error_class}",
+        shard_key=SYSTEM_SHARD_KEY,
+    )
+
+
+def record_payload_mismatch(
+    session: Session, *, extraction_id: str, field_names: list[str],
+) -> None:
+    """D1-A / T1-03 — payload vs DB mismatch audit entry. No personal data values reach this entry."""
+    chain_append(
+        session,
+        actor="system:decision-engine",
+        action="decision.payload_mismatch",
+        subject=extraction_id,
+        purpose=f"mismatched_fields={','.join(field_names)}",
+        shard_key=SYSTEM_SHARD_KEY,
+    )
+
+

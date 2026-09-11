@@ -46,22 +46,29 @@ class RedisStreamsQueue(QueuePort):
         # already-existing group is left at its current position
         # (`ensure_group` is a no-op on BUSYGROUP).
         self.ensure_group(queue, group, start="0")
-        # ">" = only genuinely new (never-delivered-to-this-group) entries.
-        # A worker that wants its own unacked backlog first should pass "0"
-        # via a second call — kept simple here since every P0 worker in
-        # this repo processes-then-acks in the same loop iteration.
+        # Check this consumer's pending unacked messages first ("0").
         resp = self._r.xreadgroup(
             groupname=group,
             consumername=consumer_name,
-            streams={queue: ">"},
+            streams={queue: "0"},
             count=count,
-            block=block_ms,
         )
+        if not resp or not resp[0][1]:
+            # No pending unacked messages — read new (">") messages, blocking up to block_ms.
+            resp = self._r.xreadgroup(
+                groupname=group,
+                consumername=consumer_name,
+                streams={queue: ">"},
+                count=count,
+                block=block_ms,
+            )
         if not resp:
             return []
         messages: list[QueueMessage] = []
         for _stream_name, entries in resp:
             for entry_id, fields in entries:
+                if not fields:
+                    continue
                 data = json.loads(fields[_PAYLOAD_FIELD])
                 pending = self._r.xpending_range(queue, group, min=entry_id, max=entry_id, count=1)
                 delivery_count = pending[0]["times_delivered"] if pending else 1

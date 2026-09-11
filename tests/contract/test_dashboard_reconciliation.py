@@ -20,6 +20,7 @@ from backend.domain.decision import route
 from backend.domain.page_lifecycle import mark_processed_if_terminal
 from backend.domain.triage import route_page
 from backend.models.entities import Batch, Extraction, Page, SourceDocument
+from landenvelope.pin import REQUIRED_MODEL_KEYS
 from landaudit.chain import shard_for, shard_key_for
 from landaudit.models import AuditEntry
 from sqlalchemy import create_engine, func, select, text
@@ -255,6 +256,10 @@ def test_triaged_but_not_decided_page_does_not_count_as_processed(session, a_pag
     route_page(
         session, document_id=a_page.document_id, page_id=a_page.id,
         doc_type="jamabandi", page_role="text", config_version="v1",
+        # T1-04 made the real Model Registry HTTP client route_page's
+        # default resolver — this test is about page.processed audit
+        # semantics, not model resolution, so it stays off the network.
+        resolve_model_versions=lambda: dict.fromkeys(REQUIRED_MODEL_KEYS, "stub-v0"),
     )
     _extraction(session, a_page, routing_outcome=None)  # extracted but not yet decided
     session.commit()

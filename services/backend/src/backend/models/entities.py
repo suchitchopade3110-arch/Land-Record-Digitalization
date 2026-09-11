@@ -681,3 +681,19 @@ class LegacyRecordRef(Base):
     external_key: Mapped[str | None] = mapped_column(String)
     external_values: Mapped[dict | None] = mapped_column(JSONB)
     disagreement_codes: Mapped[list[str] | None] = mapped_column(ARRAY(String))
+
+
+class DecisionRecord(Base):
+    """D2 / T1-03 — Decision idempotency record.
+    Enforces exactly one terminal decision per extraction_id via unique constraint.
+    """
+
+    __tablename__ = "decision_record"
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    extraction_id: Mapped[str] = mapped_column(
+        String, ForeignKey("extraction.id"), nullable=False, unique=True, index=True
+    )
+    outcome: Mapped[str] = mapped_column(String, nullable=False)
+    envelope_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    decided_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, nullable=False)
+

@@ -22,12 +22,16 @@ import uuid
 
 import pytest
 import redis
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from backend.domain.decision import route
 from backend.domain.triage import route_page
 from backend.models.entities import Batch, Extraction, Page, SourceDocument
+from backend.workers.runner import WorkerRunner
+from backend.workers.triage_router import handle as triage_handle
+from landenvelope.models import WorkEnvelope
+from landenvelope.pin import REQUIRED_MODEL_KEYS
 from landoutbox.models import OutboxMessage
 from landoutbox.relay import Relay
 from landqueue.drivers.redis_streams import RedisStreamsQueue
@@ -85,7 +89,20 @@ def _stub_text_lane_and_beyond(session: Session, page_id: str, envelope: dict) -
     return extraction
 
 
-def test_fake_end_to_end_run_from_ingest_to_a_routing_decision(engine, redis_client):
+def test_fake_end_to_end_run_from_ingest_to_a_routing_decision(engine, redis_client, monkeypatch):
+    # T1-04 made the real Model Registry HTTP client route_page's default
+    # resolver. This test drives triage through triage_router.handle() via
+    # WorkerRunner, which has no seam to pass resolve_model_versions
+    # through — so, per this file's own "stub worker" contract (every
+    # stage not owned by Suchit is a schema-valid fake stand-in), swap
+    # route_page's own keyword default for a stub for this test's duration
+    # rather than reaching a real Model Registry that isn't running here.
+    stub_versions = dict.fromkeys(REQUIRED_MODEL_KEYS, "stub-v0")
+    monkeypatch.setattr(
+        route_page, "__kwdefaults__",
+        {**route_page.__kwdefaults__, "resolve_model_versions": lambda: stub_versions},
+    )
+
     Session_ = sessionmaker(bind=engine)
     queue = RedisStreamsQueue(client=redis_client)
     text_queue_name = f"TEXT_QUEUE-e2e-{uuid.uuid4()}"
@@ -106,27 +123,50 @@ def test_fake_end_to_end_run_from_ingest_to_a_routing_decision(engine, redis_cli
         session.commit()
         page_id, document_id = page.id, doc.id
 
-    # --- triage routing (real): pin the envelope, queue the text lane ---
+    triage_queue_name = f"TRIAGE_QUEUE-e2e-{uuid.uuid4()}"
+
+    # Publish classified page message to triage queue
+    queue.publish(
+        triage_queue_name,
+        {
+            "trace_id": f"{document_id}:{page_id}",
+            "producer": "ingest",
+            "payload": {
+                "id": page_id,
+                "document_id": document_id,
+                "index": 0,
+                "doc_type": "jamabandi",
+                "page_role": "text",
+                "config_version": "cfg-e2e-v1",
+            },
+        },
+    )
+
+    # --- triage routing (real): drive via worker runner ---
+    triage_runner = WorkerRunner(
+        queue=queue,
+        queue_name=triage_queue_name,
+        group=f"backend.triage-e2e-{uuid.uuid4()}",
+        consumer_name="triage-e2e-c1",
+        handler=triage_handle,
+        session_factory=Session_,
+    )
+    processed = triage_runner.run_once()
+    assert processed == 1
+
     with Session_() as session:
-        envelope, queued_to = route_page(
-            session,
-            document_id=document_id,
-            page_id=page_id,
-            doc_type="jamabandi",
-            page_role="text",
-            config_version="cfg-e2e-v1",
-        )
         # Route directly to our test-isolated queue name rather than the
         # real TEXT_QUEUE, so this test doesn't collide with any other
         # suite's traffic on a shared broker.
-        for row in session.query(OutboxMessage).filter(OutboxMessage.queue == "TEXT_QUEUE").order_by(
-            OutboxMessage.created_at.desc()
-        ).limit(1):
+        for row in session.scalars(
+            select(OutboxMessage).where(OutboxMessage.queue == "TEXT_QUEUE").order_by(OutboxMessage.created_at.desc()).limit(1)
+        ).all():
             row.queue = text_queue_name
-        session.commit()
+        envelope = session.scalars(
+            select(WorkEnvelope).where(WorkEnvelope.page_id == page_id)
+        ).first()
         envelope_id = envelope.envelope_id
-
-    assert queued_to == ["TEXT_QUEUE"]
+        session.commit()
 
     # --- transactional outbox relay: drains to the real broker ---
     relay = Relay(session_factory=Session_, queue=queue)
@@ -152,4 +192,4 @@ def test_fake_end_to_end_run_from_ingest_to_a_routing_decision(engine, redis_cli
 
     assert result["outcome"] == "auto_accept"
 
-    redis_client.delete(text_queue_name)
+    redis_client.delete(triage_queue_name, text_queue_name)
