@@ -41,7 +41,7 @@ ANCHOR_CADENCE_ROLLS = 1
 # outside of what was pinned) once the matrix moves to real config. At P0
 # the matrix is a Python constant, not yet config-driven — this is the
 # named placeholder for when it becomes one.
-PERMISSION_MATRIX_VERSION = "phase4-fixture-v1"
+PERMISSION_MATRIX_VERSION = "phase6-t1-01-v1"
 
 # key: "publication.training_store_read_permission" — the training-store
 # bypass decision (see PHASE4.md): Tharun's modelwork reads `correction`

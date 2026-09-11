@@ -16,7 +16,8 @@ def test_expected_routes_are_mounted():
     for expected in (
         "/documents", "/config/{scope}/{key}", "/closed-sets/{type}", "/review-tasks",
         "/review-tasks/next", "/review-tasks/{task_id}/crop", "/review-tasks/{task_id}/submit",
-        "/review-tasks/{task_id}/skip", "/conflicts", "/conflicts/{conflict_id}",
+        "/review-tasks/{task_id}/skip", "/review-tasks/pending-corrections/{pending_id}/confirm",
+        "/conflicts", "/conflicts/{conflict_id}",
         "/conflicts/{conflict_id}/assign", "/conflicts/{conflict_id}/transition",
         "/dashboard/metrics", "/healthz",
     ):
