@@ -14,13 +14,20 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from landaudit import append as audit_append
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.domain.review_policy import (
     MAKER_CHECKER_EDIT_DISTANCE_THRESHOLD,
     MAKER_CHECKER_FIELD_CLASSES,
 )
-from backend.models.entities import Correction, Extraction, Page, PendingCorrection
+from backend.models.entities import (
+    Correction,
+    Extraction,
+    Page,
+    PendingCorrection,
+    ReviewTask,
+)
 
 
 class SameActorCannotConfirm(ValueError):
@@ -129,15 +136,30 @@ def submit_correction(
 def confirm_pending_correction(session: Session, pending_id: str, *, actor: str) -> Correction:
     """FR-REV-12 — the second, distinct actor's action. Only now does a
     real `Correction` row exist; only from this point on is the edit
-    visible to the publish path or the training-store read contract."""
+    visible to the publish path or the training-store read contract.
+    D2 rule: confirmer != maker, confirmer != task claimant."""
     pending = session.get(PendingCorrection, pending_id)
     if pending is None:
         raise KeyError(f"no PendingCorrection with id={pending_id!r}")
     if pending.state != "pending":
         raise PendingCorrectionAlreadyResolved(f"PendingCorrection {pending_id} is already {pending.state}")
-    if actor == pending.first_actor:
+
+    # Check claimant of review task for this extraction
+    claimant = None
+    task = session.execute(
+        select(ReviewTask).where(ReviewTask.extraction_id == pending.extraction_id)
+    ).scalars().first()
+    if task is not None:
+        claimant = task.assignee
+
+    if actor == pending.first_actor or (claimant is not None and actor == claimant):
+        audit_append(
+            session, actor=actor, action="correction.confirm_rejected",
+            subject=pending.extraction_id, purpose="maker_checker_confirm",
+        )
+        session.flush()
         raise SameActorCannotConfirm(
-            f"actor {actor!r} submitted this correction — a distinct actor must confirm it (FR-REV-12)"
+            f"actor {actor!r} cannot confirm correction submitted by {pending.first_actor!r} or claimed by {claimant!r} (FR-REV-12)"
         )
 
     correction = Correction(

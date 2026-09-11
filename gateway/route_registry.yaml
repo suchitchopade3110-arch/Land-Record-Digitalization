@@ -15,6 +15,8 @@ routes:
     kind: sync-api
     contract: contracts/openapi/config-service.suchit.yaml
     callers: [shree, shruthi, tharun]
+    permission: service_read_no_personal_data
+    note: "unauthenticated service read (no personal data); follow-up P1 service identity"
     masking: none  # config values carry no personal data
 
   - path: /config/{scope}/{key}
@@ -22,6 +24,7 @@ routes:
     owner: suchit
     service: backend
     kind: rest
+    permission: config.write
     note: "P5-02b — FR-CFG-01/03 write path. Not in the frozen config-service.suchit.yaml (GET-only contract); administrator-only (Permission.CONFIG_WRITE)."
     masking: none  # config values carry no personal data
 
@@ -32,6 +35,7 @@ routes:
     kind: sync-api
     contract: contracts/openapi/model-registry.tharun.yaml
     callers: [suchit, shree]
+    permission: service_read_no_personal_data
     masking: none  # model registry metadata carries no personal data
 
   - path: /closed-sets/{type}
@@ -41,7 +45,8 @@ routes:
     kind: sync-api
     contract: contracts/openapi/closed-sets.suchit-shruthi.yaml
     callers: [shree]
-    note: "never exposes LRMS-derived sets — schema/LGD only, FR-VAL-09"
+    permission: service_read_no_personal_data
+    note: "never exposes LRMS-derived sets — schema/LGD only, FR-VAL-09; unauthenticated service read (no personal data); follow-up P1 service identity"
     masking: none  # LGD/schema closed sets only, never a record field
 
   - path: /documents
@@ -49,6 +54,7 @@ routes:
     owner: suchit
     service: backend
     kind: rest
+    permission: document.ingest
     note: "ingest entrypoint (M1) — client uploads land here, gets a job id back, never blocks. Live as of Phase 2 (P2-01/02/04/05); see PHASE2.md."
     masking: none  # returns a job/document id, never field data
 
@@ -57,6 +63,7 @@ routes:
     owner: suchit
     service: backend
     kind: rest
+    permission: review.claim
     note: "reasons rendered come from shruthi (rule failures) and tharun (calibrator features) — backend must render both identically, FR-REV-11"
     masking: none  # ReviewTaskPublicView carries no field value/raw_value — see backend.api.serializers
 
@@ -65,6 +72,7 @@ routes:
     owner: suchit
     service: backend
     kind: rest
+    permission: review.claim
     note: "keyboard-first fetch-next, FOR UPDATE SKIP LOCKED claim — P3-03, FR-REV-01/02"
     masking: none  # same shape as GET /review-tasks
 
@@ -73,6 +81,7 @@ routes:
     owner: suchit
     service: backend
     kind: rest
+    permission: review.claim
     note: "signed, short-TTL crop URL — P3-04, FR-REV-01/FR-SEC-08"
     masking: officer_working_view_out_of_scope
     masking_note: >
@@ -92,6 +101,7 @@ routes:
     owner: suchit
     service: backend
     kind: rest
+    permission: review.submit
     note: "writes Correction (or PendingCorrection on maker-checker) + AuditSample verdict — P3-05/07/08/09"
     masking: officer_working_view_out_of_scope  # same reasoning as the crop route directly above
 
@@ -100,14 +110,25 @@ routes:
     owner: suchit
     service: backend
     kind: rest
+    permission: review.submit
     note: "releases the claim back to the pool — P3-03"
     masking: none  # no field data in the response
+
+  - path: /review-tasks/pending-corrections/{pending_id}/confirm
+    method: POST
+    owner: suchit
+    service: backend
+    kind: rest
+    permission: review.confirm
+    note: "T1-01 / FR-REV-12 maker-checker confirmation route — verifier, supervisor only"
+    masking: none
 
   - path: /conflicts
     method: GET
     owner: suchit
     service: backend
     kind: rest
+    permission: conflict.read
     masking: none  # ConflictPublicView carries record ids/rule/evidence, no field value
 
   - path: /conflicts/{conflict_id}
@@ -115,6 +136,7 @@ routes:
     owner: suchit
     service: backend
     kind: rest
+    permission: conflict.read
     masking: none
 
   - path: /conflicts/{conflict_id}/assign
@@ -122,6 +144,7 @@ routes:
     owner: suchit
     service: backend
     kind: rest
+    permission: conflict.assign
     note: "P3-10, FR-CFL-04"
     masking: none
 
@@ -130,6 +153,7 @@ routes:
     owner: suchit
     service: backend
     kind: rest
+    permission: conflict.transition
     note: "P3-10/12, FR-CFL-04/05 — resolution + author recorded in the audit trail on resolve"
     masking: none
 
@@ -138,6 +162,7 @@ routes:
     owner: suchit
     service: backend
     kind: rest
+    permission: dashboard.read
     note: "figures derived only from audit log — no second source of truth, FR-ANL-01/07"
     masking: none  # aggregate counts only, never a per-record field value
 

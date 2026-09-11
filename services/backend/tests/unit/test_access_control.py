@@ -36,6 +36,13 @@ def test_only_administrator_holds_config_write():
     assert holders == [Role.ADMINISTRATOR]
 
 
+def test_d1_permissions_holders_match_least_privilege():
+    assert [r for r in Role if has_permission(r, Permission.DOCUMENT_INGEST)] == [Role.OPERATOR, Role.ADMINISTRATOR]
+    assert [r for r in Role if has_permission(r, Permission.REVIEW_CONFIRM)] == [Role.VERIFIER, Role.SUPERVISOR]
+    assert [r for r in Role if has_permission(r, Permission.CONFLICT_READ)] == [Role.VERIFIER, Role.SUPERVISOR, Role.AUDITOR]
+    assert [r for r in Role if has_permission(r, Permission.DASHBOARD_READ)] == [Role.SUPERVISOR, Role.AUDITOR, Role.ADMINISTRATOR]
+
+
 def test_no_role_holds_every_permission_no_implicit_superuser():
     all_permissions = set(Permission)
     for role in Role:

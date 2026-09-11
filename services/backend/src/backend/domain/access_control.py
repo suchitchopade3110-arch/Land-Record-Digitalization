@@ -44,8 +44,11 @@ class Permission(str, Enum):
     permissions get added here and to `PERMISSION_MATRIX` together, never
     invented ad hoc in a handler."""
 
+    DOCUMENT_INGEST = "document.ingest"
     REVIEW_CLAIM = "review.claim"
     REVIEW_SUBMIT = "review.submit"
+    REVIEW_CONFIRM = "review.confirm"
+    CONFLICT_READ = "conflict.read"
     CONFLICT_ASSIGN = "conflict.assign"
     CONFLICT_TRANSITION = "conflict.transition"
     RECORD_READ_MASKED = "record.read.masked"
@@ -54,6 +57,7 @@ class Permission(str, Enum):
     PROVENANCE_READ = "provenance.read"
     CHAIN_VERIFY = "chain.verify"
     CONFIG_WRITE = "config.write"
+    DASHBOARD_READ = "dashboard.read"
     TRAINING_STORE_READ = "training_store.read"  # the training-store bypass decision, see PHASE4.md
 
 
@@ -64,6 +68,7 @@ class Permission(str, Enum):
 # later can never accidentally inherit a broader role's grant.
 PERMISSION_MATRIX: dict[Role, frozenset[Permission]] = {
     Role.OPERATOR: frozenset({
+        Permission.DOCUMENT_INGEST,
         Permission.REVIEW_CLAIM,
         Permission.REVIEW_SUBMIT,
         Permission.RECORD_READ_MASKED,
@@ -71,26 +76,35 @@ PERMISSION_MATRIX: dict[Role, frozenset[Permission]] = {
     Role.VERIFIER: frozenset({
         Permission.REVIEW_CLAIM,
         Permission.REVIEW_SUBMIT,
+        Permission.REVIEW_CONFIRM,
+        Permission.CONFLICT_READ,
         Permission.RECORD_READ_MASKED,
         Permission.PROVENANCE_READ,
     }),
     Role.SUPERVISOR: frozenset({
-        Permission.RECORD_READ_MASKED,
-        Permission.PROVENANCE_READ,
+        Permission.REVIEW_CONFIRM,
+        Permission.CONFLICT_READ,
         Permission.CONFLICT_ASSIGN,
         Permission.CONFLICT_TRANSITION,
+        Permission.RECORD_READ_MASKED,
         Permission.RECORD_PUBLISH,
+        Permission.PROVENANCE_READ,
+        Permission.DASHBOARD_READ,
     }),
     Role.AUDITOR: frozenset({
+        Permission.CONFLICT_READ,
         Permission.RECORD_READ_MASKED,
         Permission.PROVENANCE_READ,
         Permission.RECORD_READ_UNMASKED,  # the only role that may ever request an unmasked read
         Permission.CHAIN_VERIFY,
+        Permission.DASHBOARD_READ,
     }),
     Role.ADMINISTRATOR: frozenset({
+        Permission.DOCUMENT_INGEST,
         Permission.CONFIG_WRITE,
         Permission.TRAINING_STORE_READ,
         Permission.RECORD_READ_MASKED,
+        Permission.DASHBOARD_READ,
     }),
 }
 

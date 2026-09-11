@@ -1,10 +1,11 @@
-"""POST /documents — FR-ING-01/02/04/05. Client uploads one document, gets
+"""POST /documents — FR-ING-01/02/04/05, FR-SEC-01 (T1-01). Client uploads one document, gets
 a job id back immediately — this handler never blocks on page split or
 triage (that's `backend.workers.ingestion_consumer`, running off
 `INGESTION_QUEUE`). It never blocks on the broker being reachable either
 (`backend.domain.backpressure`): custody and the outbox write only need
 Postgres, which is what makes §07's "ingestion may queue during an outage,
 it must not reject" true by construction rather than by a retry loop here.
+Gated by Permission.DOCUMENT_INGEST (operator, administrator).
 """
 from __future__ import annotations
 
@@ -13,7 +14,9 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
+from backend.api.auth import Permission, require_permission
 from backend.api.deps import get_session
+from backend.domain.access_control import Identity
 from backend.domain.ingest import (
     MissingMandatoryBatchField,
     UnsupportedMediaType,
@@ -26,6 +29,8 @@ from backend.domain.unit_table import NoUnitTableForDistrict, unit_table_for_dis
 
 router = APIRouter(tags=["documents"])
 
+_require_document_ingest = require_permission(Permission.DOCUMENT_INGEST)
+
 
 @router.post("/documents", status_code=202)
 def create_document(
@@ -37,6 +42,7 @@ def create_document(
     custodian: str | None = Form(None),
     scanning_date: datetime | None = Form(None),  # noqa: B008 — FastAPI's Form() default-arg idiom, see ruff.toml
     batch_id: str | None = Form(None),
+    identity: Identity = Depends(_require_document_ingest),
     session: Session = Depends(get_session),
 ) -> dict:
     mime = file.content_type or "application/octet-stream"
