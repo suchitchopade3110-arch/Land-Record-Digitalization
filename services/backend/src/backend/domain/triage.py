@@ -14,24 +14,9 @@ from landoutbox import write as outbox_write
 from observability.envelope import emit
 from sqlalchemy.orm import Session
 
+from backend.domain.model_registry_client import resolve_active_model_versions
+
 ResolveModelVersions = Callable[[], dict[str, str]]
-
-
-def _stub_resolve_model_versions() -> dict[str, str]:
-    """TODO: FR-TRI-09 — call Tharun's `GET /models/{module}/active` once
-    per page (API-Contracts §4.2) to resolve real model versions. Tharun's
-    model registry does not exist yet (Team-Split: Person 4's P0 scope),
-    so this stand-in returns a fixed, clearly-labeled placeholder version
-    for all five models the envelope requires — schema-valid fake output,
-    replaceable with zero caller changes once the real registry ships, per
-    Rule 0's "stub worker" contract."""
-    return {
-        "triage_classifier": "stub-v0",
-        "printed_ocr": "stub-v0",
-        "hwr": "stub-v0",
-        "confidence_calibrator": "stub-v0",
-        "novelty_detector": "stub-v0",
-    }
 
 
 def route_page(
@@ -42,7 +27,7 @@ def route_page(
     doc_type: str,
     page_role: str,
     config_version: str,
-    resolve_model_versions: ResolveModelVersions = _stub_resolve_model_versions,
+    resolve_model_versions: ResolveModelVersions = resolve_active_model_versions,
 ) -> tuple[WorkEnvelope, list[str]]:
     """Pin the work envelope (once — FR-TRI-09) and enqueue the page onto
     TEXT_QUEUE and/or MAP_QUEUE per `lane_for`. Both the pin and the

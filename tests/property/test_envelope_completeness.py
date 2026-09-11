@@ -89,6 +89,11 @@ def test_every_generated_classifier_output_produces_a_complete_envelope_on_every
         envelope, queued_to = route_page(
             session, document_id=page.document_id, page_id=page.id,
             doc_type=doc_type, page_role=page_role, config_version="cfg-property-v1",
+            # T1-04 made the real Model Registry HTTP client route_page's
+            # default resolver — this property test is about envelope
+            # completeness across classifier outputs, not model
+            # resolution, so it stays off the network.
+            resolve_model_versions=lambda: dict.fromkeys(REQUIRED_MODEL_KEYS, "stub-v0"),
         )
         session.flush()
 

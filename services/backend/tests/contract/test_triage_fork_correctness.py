@@ -15,11 +15,17 @@ from sqlalchemy.orm import Session
 
 from backend.domain.triage import route_page
 from backend.models.entities import Batch, Page, SourceDocument
+from landenvelope.pin import REQUIRED_MODEL_KEYS
 from landoutbox.models import OutboxMessage
 
 TEST_DB_URL = os.environ.get(
     "TEST_DATABASE_URL", "postgresql+psycopg://dev:dev@localhost:5432/landrecords_test"
 )
+
+# T1-04 made the real Model Registry HTTP client route_page's default
+# resolver — this file is about fork correctness (queue rows), not model
+# resolution, so every route_page() call below stays off the network.
+_STUB_MODEL_VERSIONS = dict.fromkeys(REQUIRED_MODEL_KEYS, "stub-v0")
 
 
 @pytest.fixture(scope="module")
@@ -59,6 +65,7 @@ def test_a_mixed_register_and_sketch_page_enters_both_queues_exactly_once_each(s
     _, queued_to = route_page(
         session, document_id=page.document_id, page_id=page.id,
         doc_type="cadastral_map", page_role="tabular_register", config_version="cfg-v1",
+        resolve_model_versions=lambda: _STUB_MODEL_VERSIONS,
     )
     session.flush()
 
@@ -77,6 +84,7 @@ def test_a_text_only_page_never_populates_map_queue(session):
     _, queued_to = route_page(
         session, document_id=page.document_id, page_id=page.id,
         doc_type="jamabandi", page_role="text", config_version="cfg-v1",
+        resolve_model_versions=lambda: _STUB_MODEL_VERSIONS,
     )
     session.flush()
 
@@ -94,6 +102,7 @@ def test_a_map_only_page_never_populates_text_queue(session):
     _, queued_to = route_page(
         session, document_id=page.document_id, page_id=page.id,
         doc_type="cadastral_map", page_role="map_sheet", config_version="cfg-v1",
+        resolve_model_versions=lambda: _STUB_MODEL_VERSIONS,
     )
     session.flush()
 
@@ -111,6 +120,7 @@ def test_a_blank_page_enters_neither_queue(session):
     _, queued_to = route_page(
         session, document_id=page.document_id, page_id=page.id,
         doc_type="jamabandi", page_role="blank", config_version="cfg-v1",
+        resolve_model_versions=lambda: _STUB_MODEL_VERSIONS,
     )
     session.flush()
 

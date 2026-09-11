@@ -19,9 +19,15 @@ from backend.models.entities import (
     ReviewTask,
     SourceDocument,
 )
+from landenvelope.pin import REQUIRED_MODEL_KEYS
 from landoutbox.models import OutboxMessage
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
+
+# T1-04 made the real Model Registry HTTP client route_page's default
+# resolver — these tests are about triage/decision routing, not model
+# resolution, so every route_page() call below stays off the network.
+_STUB_MODEL_VERSIONS = dict.fromkeys(REQUIRED_MODEL_KEYS, "stub-v0")
 
 TEST_DB_URL = os.environ.get(
     "TEST_DATABASE_URL", "postgresql+psycopg://dev:dev@localhost:5432/landrecords_test"
@@ -89,6 +95,7 @@ def test_route_page_pins_one_envelope_and_queues_the_text_lane(session, a_page):
         doc_type="jamabandi",
         page_role="text",
         config_version="cfg-v1",
+        resolve_model_versions=lambda: _STUB_MODEL_VERSIONS,
     )
     session.commit()
 
@@ -113,6 +120,7 @@ def test_route_page_queues_both_lanes_for_a_mixed_page(session, a_page):
         doc_type="cadastral_map",
         page_role="tabular_register",
         config_version="cfg-v1",
+        resolve_model_versions=lambda: _STUB_MODEL_VERSIONS,
     )
     session.commit()
 
@@ -132,6 +140,7 @@ def test_route_page_and_outbox_write_commit_atomically(session, a_page):
     route_page(
         session, document_id=a_page.document_id, page_id=a_page.id,
         doc_type="jamabandi", page_role="text", config_version="cfg-v1",
+        resolve_model_versions=lambda: _STUB_MODEL_VERSIONS,
     )
     session.rollback()
 

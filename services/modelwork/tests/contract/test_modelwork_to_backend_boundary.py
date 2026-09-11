@@ -272,8 +272,16 @@ def test_a_auto_accept_end_to_end():
     assert decision_msg["producer"] == "confidence-novelty"
     assert decision_msg["payload"]["routing_outcome"] == "auto_accept"
 
-    # Backend consumes DecisionEnvelope
-    db_ext = TestExtractionEntity(extraction_id="ext-auto-01")
+    # Backend consumes DecisionEnvelope. D1-A: the DB row must already carry
+    # what M8 wrote directly to Postgres — decision_engine reads DB truth
+    # and only checks the message against it, it does not write these
+    # columns from the payload (that was the pre-T1-03 behavior this
+    # contract now forbids).
+    db_ext = TestExtractionEntity(
+        extraction_id="ext-auto-01",
+        routing_outcome=decision_msg["payload"]["routing_outcome"],
+        calibrated_confidence=decision_msg["payload"]["calibrated_confidence"],
+    )
     session = MockSession([db_ext])
     backend_res = handle(decision_msg, session)
 
@@ -306,7 +314,11 @@ def test_b_review_end_to_end():
     assert decision_msg is not None
     assert decision_msg["payload"]["routing_outcome"] == "review"
 
-    db_ext = TestExtractionEntity(extraction_id="ext-review-01")
+    db_ext = TestExtractionEntity(
+        extraction_id="ext-review-01",
+        routing_outcome=decision_msg["payload"]["routing_outcome"],
+        calibrated_confidence=decision_msg["payload"]["calibrated_confidence"],
+    )
     session = MockSession([db_ext])
     backend_res = handle(decision_msg, session)
 
@@ -338,7 +350,11 @@ def test_c_audit_sample_end_to_end():
     assert decision_msg is not None
     assert decision_msg["payload"]["routing_outcome"] == "audit_sample"
 
-    db_ext = TestExtractionEntity(extraction_id="ext-audit-01")
+    db_ext = TestExtractionEntity(
+        extraction_id="ext-audit-01",
+        routing_outcome=decision_msg["payload"]["routing_outcome"],
+        calibrated_confidence=decision_msg["payload"]["calibrated_confidence"],
+    )
     session = MockSession([db_ext])
     backend_res = handle(decision_msg, session)
 
@@ -374,7 +390,11 @@ def test_d_conflict_end_to_end():
     assert decision_msg is not None
     assert decision_msg["payload"]["routing_outcome"] == "conflict"
 
-    db_ext = TestExtractionEntity(extraction_id="ext-cfl-01")
+    db_ext = TestExtractionEntity(
+        extraction_id="ext-cfl-01",
+        routing_outcome=decision_msg["payload"]["routing_outcome"],
+        calibrated_confidence=decision_msg["payload"]["calibrated_confidence"],
+    )
     session = MockSession([db_ext])
     backend_res = handle(decision_msg, session)
 
@@ -406,7 +426,11 @@ def test_e_outside_calibrated_regime_end_to_end():
     assert decision_msg is not None
     assert decision_msg["payload"]["routing_outcome"] == "outside_calibrated_regime"
 
-    db_ext = TestExtractionEntity(extraction_id="ext-nov-01")
+    db_ext = TestExtractionEntity(
+        extraction_id="ext-nov-01",
+        routing_outcome=decision_msg["payload"]["routing_outcome"],
+        calibrated_confidence=decision_msg["payload"]["calibrated_confidence"],
+    )
     session = MockSession([db_ext])
     backend_res = handle(decision_msg, session)
 
@@ -486,7 +510,10 @@ def test_h_invalid_routing_rejected_by_backend():
     with pytest.raises(UnroutableExtraction):
         route(session, "ext-inv-01")
 
-    # Queue message carrying invalid outcome raises UnroutableExtraction
+    # Queue message carrying invalid outcome raises UnroutableExtraction —
+    # matching the DB row's routing_outcome to the payload here (D1-A) so
+    # the D1-A mismatch check doesn't fire before route()'s enum check does.
+    db_ext.routing_outcome = "unsupported_magic_route"
     invalid_msg = {
         "payload": {
             "id": "ext-inv-01",
