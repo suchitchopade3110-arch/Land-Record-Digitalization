@@ -59,14 +59,19 @@ def upgrade() -> None:
                 END IF;
             END $$;
 
-            -- D1-A Column-level privileges:
-            GRANT SELECT ON extractions TO modelwork_role;
-            GRANT UPDATE (routing_outcome, calibrated_confidence) ON extractions TO modelwork_role;
+            -- D1-A Column-level privileges. Table is `extraction` (see
+            -- backend.models.entities.Extraction.__tablename__), and the
+            -- columns below are that model's actual field names — not the
+            -- generic names ("raw_text", "canonical_name", "bounding_box",
+            -- "status") this migration originally granted on, which don't
+            -- exist on this table at all.
+            GRANT SELECT ON extraction TO modelwork_role;
+            GRANT UPDATE (routing_outcome, calibrated_confidence) ON extraction TO modelwork_role;
 
-            GRANT SELECT, INSERT ON extractions TO extraction_role;
-            GRANT UPDATE (raw_text, canonical_name, bounding_box, status) ON extractions TO extraction_role;
+            GRANT SELECT, INSERT ON extraction TO extraction_role;
+            GRANT UPDATE (raw_value, canonical_value, bbox, entry_status) ON extraction TO extraction_role;
 
-            GRANT SELECT ON extractions TO backend_role;
+            GRANT SELECT ON extraction TO backend_role;
             GRANT SELECT, INSERT, UPDATE, DELETE ON decision_record TO backend_role;
             """
         )
@@ -78,9 +83,9 @@ def downgrade() -> None:
         op.execute(
             """
             REVOKE ALL PRIVILEGES ON decision_record FROM backend_role;
-            REVOKE ALL PRIVILEGES ON extractions FROM backend_role;
-            REVOKE ALL PRIVILEGES ON extractions FROM extraction_role;
-            REVOKE ALL PRIVILEGES ON extractions FROM modelwork_role;
+            REVOKE ALL PRIVILEGES ON extraction FROM backend_role;
+            REVOKE ALL PRIVILEGES ON extraction FROM extraction_role;
+            REVOKE ALL PRIVILEGES ON extraction FROM modelwork_role;
             """
         )
 

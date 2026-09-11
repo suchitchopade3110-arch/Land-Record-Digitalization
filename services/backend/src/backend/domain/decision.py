@@ -10,6 +10,7 @@ already set on the `Extraction` it receives.
 """
 from __future__ import annotations
 
+import uuid
 from datetime import datetime, timezone
 
 from landaudit import append as audit_append
@@ -17,7 +18,6 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.domain.review_policy import NOVELTY_CLUSTER_ALERT_DEDUP_WINDOW
-import uuid
 from backend.models.entities import (
     AuditSample,
     Conflict,

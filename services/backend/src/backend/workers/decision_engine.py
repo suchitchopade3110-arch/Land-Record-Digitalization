@@ -47,12 +47,18 @@ def handle(message: dict, session: Session) -> dict:
 
     # Verify payload matches DB state if provided (D1-A)
     mismatched_fields: list[str] = []
-    if "routing_outcome" in payload and payload["routing_outcome"] is not None:
-        if payload["routing_outcome"] != extraction.routing_outcome:
-            mismatched_fields.append("routing_outcome")
-    if "calibrated_confidence" in payload and payload["calibrated_confidence"] is not None:
-        if payload["calibrated_confidence"] != extraction.calibrated_confidence:
-            mismatched_fields.append("calibrated_confidence")
+    if (
+        "routing_outcome" in payload
+        and payload["routing_outcome"] is not None
+        and payload["routing_outcome"] != extraction.routing_outcome
+    ):
+        mismatched_fields.append("routing_outcome")
+    if (
+        "calibrated_confidence" in payload
+        and payload["calibrated_confidence"] is not None
+        and payload["calibrated_confidence"] != extraction.calibrated_confidence
+    ):
+        mismatched_fields.append("calibrated_confidence")
 
     if mismatched_fields:
         record_payload_mismatch(
@@ -60,6 +66,13 @@ def handle(message: dict, session: Session) -> dict:
             extraction_id=extraction_id,
             field_names=mismatched_fields,
         )
+        # Commit the audit entry now, before raising — the caller (the
+        # worker runner) rolls back this same session on any handler
+        # exception (ack-after-commit, D1), which would otherwise erase
+        # the very audit trail this mismatch check exists to produce.
+        # Nothing else is pending in this transaction yet (the extraction
+        # fetch above was read-only), so this only commits the audit row.
+        session.commit()
         raise PayloadMismatchError(
             f"Payload values for {mismatched_fields} do not match database state for extraction {extraction_id}"
         )

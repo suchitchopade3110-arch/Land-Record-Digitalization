@@ -186,6 +186,16 @@ def test_changed_outcome_for_already_decided_extraction_is_rejected(session_fact
         decision_handle(msg1, session)
         session.commit()
 
+    # Simulate M8 legitimately writing a new routing_outcome straight to
+    # Postgres (D1-A) — decision_engine reads DB truth, not the payload,
+    # so triggering AlreadyDecidedWithDifferentOutcome (as opposed to the
+    # unrelated D1-A payload/DB mismatch check) requires the DB itself,
+    # not just the message, to have moved to the new outcome.
+    with session_factory() as session:
+        ext = session.get(Extraction, extraction_id)
+        ext.routing_outcome = "conflict"
+        session.commit()
+
     # Attempt to change decision to 'conflict' without reprocessing workflow
     msg2 = {
         "trace_id": f"doc:{sample_page}",
