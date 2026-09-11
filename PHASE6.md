@@ -114,3 +114,18 @@
   - `test_resolver_with_real_modelwork_fastapi_app`
 - All `stub-v0` occurrences removed from `services/backend/src`.
 
+## T1-05 · M13 configuration — Design: what `WorkEnvelope.config_version` pins
+
+### 1. Decisions Applied
+- **Design Decision: Option A (Snapshot Manifest)** accepted via [ADR-008](file:///d:/Land-Record-Digitalization/docs/adr/ADR-008-config-pin-semantics.md):
+  - `WorkEnvelope.config_version` holds a content-addressed snapshot identifier (`snap-<hash>`).
+  - Backend maintains a `config_snapshot(id, manifest JSONB)` table mapping `"{scope}:{key}" -> row_id`.
+  - Pinned reads (`GET /config/{scope}/{key}?config_version=snap-...`) resolve the snapshot manifest and return the immutable `ConfigVersion` row.
+  - Guarantees strict mathematical replay determinism (FR-TRI-09, FR-CFG-02) across all configuration keys.
+  - Zero contract changes to `contracts/` and zero changes required for teammate client code in `services/extraction`, `services/modelwork`, and `services/validation`.
+
+### 2. Verification
+- Gap probe executed and verified against domain logic: confirmed that pinning a single row's ID in `WorkEnvelope.config_version` causes all other keys to raise `ConfigNotFound`.
+- ADR-008 authored and accepted in `docs/adr/ADR-008-config-pin-semantics.md`.
+- No code or schema modifications in T1-05 (pure design task; implementation in T1-06).
+
