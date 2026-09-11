@@ -97,6 +97,74 @@ services:
     depends_on: [postgres, minio, redis, anchor_store]
     ports: ["8001:8000"]
 
+  backend-ingestion:
+    build: ../services/backend
+    command: python -m backend.workers.run ingestion
+    environment:
+      DATABASE_URL: postgresql://postgres:dev@postgres:5432/landrecords
+      OBJECT_STORE_URL: http://minio:9000
+      QUEUE_URL: redis://redis:6379
+      SECONDARY_OBJECT_STORE_ROOT: /data/secondary-objects
+      DROP_FOLDER_PATH: /data/drop-folder
+      ANCHOR_STORE_DRIVER: s3
+      ANCHOR_STORE_URL: http://anchor_store:9000
+      ANCHOR_STORE_BUCKET: audit-anchors
+      ANCHOR_STORE_ACCESS_KEY_ID: backend-anchor-writer
+      ANCHOR_STORE_SECRET_ACCESS_KEY: backend-anchor-writer-password-CHANGE-ME
+      ANCHOR_KMS_KEY_SEED: dev-only-anchor-kms-seed-CHANGE-ME
+      AUDIT_HMAC_KEY: dev-only-audit-hmac-key-CHANGE-ME
+    volumes:
+      - backend_data:/data
+    depends_on: [postgres, minio, redis, anchor_store]
+
+  backend-triage:
+    build: ../services/backend
+    command: python -m backend.workers.run triage
+    environment:
+      DATABASE_URL: postgresql://postgres:dev@postgres:5432/landrecords
+      OBJECT_STORE_URL: http://minio:9000
+      QUEUE_URL: redis://redis:6379
+      SECONDARY_OBJECT_STORE_ROOT: /data/secondary-objects
+      DROP_FOLDER_PATH: /data/drop-folder
+      ANCHOR_STORE_DRIVER: s3
+      ANCHOR_STORE_URL: http://anchor_store:9000
+      ANCHOR_STORE_BUCKET: audit-anchors
+      ANCHOR_STORE_ACCESS_KEY_ID: backend-anchor-writer
+      ANCHOR_STORE_SECRET_ACCESS_KEY: backend-anchor-writer-password-CHANGE-ME
+      ANCHOR_KMS_KEY_SEED: dev-only-anchor-kms-seed-CHANGE-ME
+      AUDIT_HMAC_KEY: dev-only-audit-hmac-key-CHANGE-ME
+    volumes:
+      - backend_data:/data
+    depends_on: [postgres, minio, redis, anchor_store]
+
+  backend-decision:
+    build: ../services/backend
+    command: python -m backend.workers.run decision
+    environment:
+      DATABASE_URL: postgresql://postgres:dev@postgres:5432/landrecords
+      OBJECT_STORE_URL: http://minio:9000
+      QUEUE_URL: redis://redis:6379
+      SECONDARY_OBJECT_STORE_ROOT: /data/secondary-objects
+      DROP_FOLDER_PATH: /data/drop-folder
+      ANCHOR_STORE_DRIVER: s3
+      ANCHOR_STORE_URL: http://anchor_store:9000
+      ANCHOR_STORE_BUCKET: audit-anchors
+      ANCHOR_STORE_ACCESS_KEY_ID: backend-anchor-writer
+      ANCHOR_STORE_SECRET_ACCESS_KEY: backend-anchor-writer-password-CHANGE-ME
+      ANCHOR_KMS_KEY_SEED: dev-only-anchor-kms-seed-CHANGE-ME
+      AUDIT_HMAC_KEY: dev-only-audit-hmac-key-CHANGE-ME
+    volumes:
+      - backend_data:/data
+    depends_on: [postgres, minio, redis, anchor_store]
+
+  backend-outbox-relay:
+    build: ../services/backend
+    command: python -m backend.workers.run outbox-relay
+    environment:
+      DATABASE_URL: postgresql://postgres:dev@postgres:5432/landrecords
+      QUEUE_URL: redis://redis:6379
+    depends_on: [postgres, redis]
+
   extraction:
     build: ../services/extraction
     environment:
