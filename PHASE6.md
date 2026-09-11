@@ -86,3 +86,31 @@
   - `test_service_db_roles_and_column_level_grants`: Verifies PostgreSQL role grants prevent unauthorized column updates across service boundaries.
 - Database migration `0010_decision_record_and_service_roles.py` created and verified.
 
+## T1-04 · M2 triage routing — Pin real model versions from Tharun's registry
+
+### 1. Decisions Applied
+- **D1 Failure policy:**
+  - If any of the five required modules (`printed_ocr`, `hwr`, `calibrator`, `novelty_detector`, `triage_classifier`) is unreachable, times out, or returns != 200 (including 404), `resolve_active_model_versions()` raises `ModelRegistryResolutionError`.
+  - No partial envelopes or silent default versions are pinned. Atomic transaction guarantees no orphaned `work_envelope` or `outbox_message` rows exist on failure.
+- **D2 Stratum:**
+  - Triage operates at page-level (no field class exists yet at triage time); `stratum` parameter is not sent during page-level envelope resolution.
+- **D3 Transport config:**
+  - `MODEL_REGISTRY_BASE_URL` read from environment (defaulting to `http://localhost:8004`).
+  - `DEFAULT_MODEL_REGISTRY_TIMEOUT_MS = 2000` (config key: `model_registry.timeout_ms`).
+- **Module mapping:**
+  - Maps `calibrator` in `model_version.schema.json` to `confidence_calibrator` in `work_envelope.schema.json`.
+
+### 2. Verification
+- `services/backend/tests/unit/test_model_registry_client.py`:
+  - `test_resolve_active_model_versions_mapping_and_schema`: Verifies all 5 modules are fetched and mapped to required envelope keys matching schema.
+  - `test_resolve_active_model_versions_with_real_modelwork_asgi`: End-to-end against Tharun's real FastAPI `GET /models/{module}/active` endpoint.
+  - `test_resolve_active_model_versions_raises_on_404`: Strict failure on 404.
+  - `test_resolve_active_model_versions_raises_on_timeout_or_connection_error`: Strict failure on network error.
+  - `test_resolve_active_model_versions_raises_on_malformed_response`: Strict validation of response payload.
+- `tests/contract/test_model_registry_resolver.py`:
+  - `test_resolver_maps_five_modules_and_validates_work_envelope_schema`
+  - `test_resolver_failure_raises_and_rolls_back_atomically`
+  - `test_promotion_replay_preserves_initial_versions_with_zero_http_requests`
+  - `test_resolver_with_real_modelwork_fastapi_app`
+- All `stub-v0` occurrences removed from `services/backend/src`.
+
