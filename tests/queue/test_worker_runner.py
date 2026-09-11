@@ -33,12 +33,14 @@ from backend.domain.queue_policy import (
     DEFAULT_MAX_DELIVERIES,
     get_queue_policy,
 )
+from backend.domain.triage import route_page
 from backend.models.entities import Batch, Page, SourceDocument
 from backend.workers.ingestion_consumer import handle as ingestion_handle
 from backend.workers.runner import WorkerRunner, run_worker_once
 from backend.workers.triage_router import handle as triage_handle
 from landaudit.models import AuditEntry
 from landenvelope.models import WorkEnvelope
+from landenvelope.pin import REQUIRED_MODEL_KEYS
 from landoutbox.models import OutboxMessage
 from landoutbox.relay import Relay
 from landqueue.drivers.redis_streams import RedisStreamsQueue
@@ -203,10 +205,21 @@ def test_crash_between_commit_and_ack_is_idempotent_ingestion(queue_driver, sess
         assert len(pages) == 1, f"Expected exactly 1 page, found {len(pages)}"
 
 
-def test_crash_between_commit_and_ack_is_idempotent_triage(queue_driver, session_factory):
+def test_crash_between_commit_and_ack_is_idempotent_triage(queue_driver, session_factory, monkeypatch):
     """Broken implementation it catches: triage_router creating duplicate
     WorkEnvelope rows when redelivered after an unacked commit (FR-TRI-09 / T2.d).
     """
+    # T1-04 made the real Model Registry HTTP client route_page's default
+    # resolver. This test drives triage through triage_router.handle(),
+    # which has no seam to pass resolve_model_versions through — this test
+    # is about ack/redelivery idempotency, not model resolution, so swap
+    # route_page's own keyword default for a stub for its duration.
+    stub_versions = dict.fromkeys(REQUIRED_MODEL_KEYS, "stub-v0")
+    monkeypatch.setattr(
+        route_page, "__kwdefaults__",
+        {**route_page.__kwdefaults__, "resolve_model_versions": lambda: stub_versions},
+    )
+
     queue_name = f"TRIAGE_QUEUE-{uuid.uuid4()}"
     group_name = f"backend.triage-{uuid.uuid4()}"
     consumer_name = "triage-c1"

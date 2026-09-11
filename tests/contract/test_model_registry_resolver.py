@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections import namedtuple
 from pathlib import Path
 import uuid
 
@@ -58,8 +59,17 @@ def session_factory(engine):
     return sessionmaker(bind=engine, future=True)
 
 
+_SamplePage = namedtuple("_SamplePage", ["id", "document_id"])
+
+
 @pytest.fixture
 def sample_page(session_factory):
+    # Returns a plain (id, document_id) tuple, not the live ORM `Page` —
+    # `expire_on_commit=True` (the sessionmaker default) expires every
+    # attribute at the `session.commit()` below, and the `with` block
+    # closes this fixture's session right after returning, so a caller
+    # touching `page.id`/`page.document_id` afterwards would hit
+    # DetachedInstanceError trying to refresh from a session that's gone.
     with session_factory() as session:
         batch = Batch(district="sitapur")
         session.add(batch)
@@ -76,7 +86,7 @@ def sample_page(session_factory):
         page = Page(document_id=doc.id, index=0)
         session.add(page)
         session.commit()
-        return page
+        return _SamplePage(id=page.id, document_id=page.document_id)
 
 
 # ---------------------------------------------------------------------------
@@ -209,7 +219,10 @@ def test_promotion_replay_preserves_initial_versions_with_zero_http_requests(ses
     transport = httpx.MockTransport(mock_handler)
     client = httpx.Client(base_url="http://model-registry.test", transport=transport)
 
-    # Initial run: fetches 5 model versions from registry
+    # Initial run: fetches 5 model versions from registry. Capture the
+    # plain values we need before the `with` block closes the session —
+    # `first_env` would otherwise be a detached, expired ORM instance by
+    # the time the asserts below run (expire_on_commit=True).
     with session_factory() as session:
         first_env, _ = route_page(
             session,
@@ -221,9 +234,11 @@ def test_promotion_replay_preserves_initial_versions_with_zero_http_requests(ses
             resolve_model_versions=lambda: resolve_active_model_versions(client=client),
         )
         session.commit()
+        first_envelope_id = first_env.envelope_id
+        first_printed_ocr_version = first_env.model_versions["printed_ocr"]
 
     assert http_request_count == 5
-    assert first_env.model_versions["printed_ocr"] == "ocr-v1"
+    assert first_printed_ocr_version == "ocr-v1"
 
     # Simulate upstream promotion of printed_ocr to v2
     current_versions["printed_ocr"] = "ocr-v2-PROMOTED"
@@ -240,12 +255,14 @@ def test_promotion_replay_preserves_initial_versions_with_zero_http_requests(ses
             resolve_model_versions=lambda: resolve_active_model_versions(client=client),
         )
         session.commit()
+        second_envelope_id = second_env.envelope_id
+        second_printed_ocr_version = second_env.model_versions["printed_ocr"]
 
     # Replay must NOT make any new HTTP requests (HTTP request count remains 5)
     assert http_request_count == 5
     # Envelope must retain initial pinned version (ocr-v1), NOT promoted version (ocr-v2-PROMOTED)
-    assert second_env.envelope_id == first_env.envelope_id
-    assert second_env.model_versions["printed_ocr"] == "ocr-v1"
+    assert second_envelope_id == first_envelope_id
+    assert second_printed_ocr_version == "ocr-v1"
 
 
 # ---------------------------------------------------------------------------

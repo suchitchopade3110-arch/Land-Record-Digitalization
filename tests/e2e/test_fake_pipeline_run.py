@@ -26,10 +26,12 @@ from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from backend.domain.decision import route
+from backend.domain.triage import route_page
 from backend.models.entities import Batch, Extraction, Page, SourceDocument
 from backend.workers.runner import WorkerRunner
 from backend.workers.triage_router import handle as triage_handle
 from landenvelope.models import WorkEnvelope
+from landenvelope.pin import REQUIRED_MODEL_KEYS
 from landoutbox.models import OutboxMessage
 from landoutbox.relay import Relay
 from landqueue.drivers.redis_streams import RedisStreamsQueue
@@ -87,7 +89,20 @@ def _stub_text_lane_and_beyond(session: Session, page_id: str, envelope: dict) -
     return extraction
 
 
-def test_fake_end_to_end_run_from_ingest_to_a_routing_decision(engine, redis_client):
+def test_fake_end_to_end_run_from_ingest_to_a_routing_decision(engine, redis_client, monkeypatch):
+    # T1-04 made the real Model Registry HTTP client route_page's default
+    # resolver. This test drives triage through triage_router.handle() via
+    # WorkerRunner, which has no seam to pass resolve_model_versions
+    # through — so, per this file's own "stub worker" contract (every
+    # stage not owned by Suchit is a schema-valid fake stand-in), swap
+    # route_page's own keyword default for a stub for this test's duration
+    # rather than reaching a real Model Registry that isn't running here.
+    stub_versions = dict.fromkeys(REQUIRED_MODEL_KEYS, "stub-v0")
+    monkeypatch.setattr(
+        route_page, "__kwdefaults__",
+        {**route_page.__kwdefaults__, "resolve_model_versions": lambda: stub_versions},
+    )
+
     Session_ = sessionmaker(bind=engine)
     queue = RedisStreamsQueue(client=redis_client)
     text_queue_name = f"TEXT_QUEUE-e2e-{uuid.uuid4()}"
