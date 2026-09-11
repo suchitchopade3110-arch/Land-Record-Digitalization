@@ -25,3 +25,40 @@
 - `tests/contract/test_route_registry_permissions.py`: All mounted routes × all 5 roles verified against declared `permission:`.
 - `tests/contract/test_actor_spoofing_and_workflow_rbac.py`: Actor spoofing via body/query parameters prevented; `identity.actor` used for all operations.
 - `tests/contract/test_rbac_audit_shard_and_masking.py`: `rbac.checked` and `rbac.denied` entries land in `landaudit.SYSTEM_SHARD_KEY` with no field values.
+
+## T1-02 · Queue infrastructure — Worker runner: consume loops, ack-after-commit, dead-letter, outbox relay loop
+
+### 1. Decisions Applied
+- **D1 delivery semantics:**
+  - At-least-once. Messages are acknowledged (`queue.ack`) only after the handler's database transaction commits (`ack-after-commit`).
+  - Handler exceptions roll back the database session and leave the message unacknowledged for broker redelivery.
+  - After `queue.max_deliveries` (default 5, configurable), poison messages are moved to `<QUEUE>.DLQ`, acknowledged on the main stream, and audited via `queue.dead_lettered` in `landaudit.SYSTEM_SHARD_KEY` with `queue`, `message_id`, `delivery_count`, and `error_class` (no payload values).
+  - Parity gap closed in `libs/queue`: `RedisStreamsQueue` and `InMemoryQueue` both check and redeliver pending unacked messages before reading new stream messages.
+- **D2 transaction ownership:**
+  - `WorkerRunner` owns the session lifecycle and single transaction commit.
+  - Handlers (`triage_router`, `decision_engine`, `ingestion_consumer`) flush changes without calling `session.commit()` directly.
+- **D3 process layout:**
+  - Single entrypoint `python -m backend.workers.run <worker>` supporting `ingestion`, `triage`, `decision`, and `outbox-relay`.
+  - Docker Compose services defined: `backend-ingestion`, `backend-triage`, `backend-decision`, `backend-outbox-relay`.
+  - Consumer group: `backend.<worker>`; consumer name: `<hostname>-<pid>`.
+  - `make workers` target added to `Makefile` to bring up worker containers.
+- **D4 config keys:**
+  - Defined in `backend.domain.queue_policy` with config keys named next to each default:
+    - `queue.block_ms` (`DEFAULT_BLOCK_MS = 1000`)
+    - `queue.batch_count` (`DEFAULT_BATCH_COUNT = 1`)
+    - `queue.max_deliveries` (`DEFAULT_MAX_DELIVERIES = 5`)
+    - `outbox.relay_interval_ms` (`DEFAULT_RELAY_INTERVAL_MS = 500`)
+    - `outbox.relay_batch_size` (`DEFAULT_RELAY_BATCH_SIZE = 100`)
+
+### 2. Verification
+- `tests/queue/test_worker_runner.py`:
+  - `test_ack_after_commit_redelivers_on_failure`
+  - `test_crash_between_commit_and_ack_is_idempotent_ingestion`
+  - `test_crash_between_commit_and_ack_is_idempotent_triage`
+  - `test_poison_message_lands_in_dlq_after_max_deliveries`
+  - `test_two_relay_loops_drain_outbox_without_duplicates`
+  - `test_sigterm_mid_batch_finishes_or_rolls_back_safely`
+  - `test_block_ms_from_config_reaches_driver_call`
+- `tests/queue/test_conformance.py`: 9 passed against `InMemoryQueue` (Redis/NATS skipped if servers not running locally).
+- `infra/docker-compose.yml`: `docker compose config` validates cleanly with all new worker services.
+

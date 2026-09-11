@@ -97,6 +97,20 @@ class InMemoryQueue(QueuePort):
         deadline = None if block_ms == 0 else (time.monotonic() + block_ms / 1000.0)
 
         with self._not_empty:
+            pending_dict = self._pending.get(key, {})
+            if pending_dict:
+                pending_ids = list(pending_dict.keys())[:count]
+                messages: list[QueueMessage] = []
+                for seq_id in pending_ids:
+                    msg = pending_dict[seq_id]
+                    dcount_key = (queue, group, seq_id)
+                    delivery_count = self._delivery_counts.get(dcount_key, 0) + 1
+                    self._delivery_counts[dcount_key] = delivery_count
+                    updated_msg = QueueMessage(sequence_id=seq_id, data=msg.data, delivery_count=delivery_count)
+                    self._pending[key][seq_id] = updated_msg
+                    messages.append(updated_msg)
+                return messages
+
             while True:
                 stream = self._streams.get(queue, [])
                 cursor = self._cursors[key]
@@ -135,6 +149,7 @@ class InMemoryQueue(QueuePort):
             stream = self._streams.get(queue, [])
             index = next((i for i, (sid, _) in enumerate(stream) if sid == sequence_id), None)
             self._cursors[key] = 0 if index is None else index + 1
+            self._pending[key] = {}
 
     def pending_count(self, queue: str, group: str) -> int:
         """Test-only helper (no `QueuePort` equivalent exists) — the

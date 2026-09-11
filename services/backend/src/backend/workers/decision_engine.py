@@ -38,6 +38,4 @@ def handle(message: dict, session: Session) -> dict:
             extraction.calibrated_confidence = payload["calibrated_confidence"]
 
     novelty_cluster_id = payload.get("novelty_cluster_id") or message.get("novelty_cluster_id")
-    result = route(session, extraction_id, novelty_cluster_id=novelty_cluster_id)
-    session.commit()
-    return result
+    return route(session, extraction_id, novelty_cluster_id=novelty_cluster_id)

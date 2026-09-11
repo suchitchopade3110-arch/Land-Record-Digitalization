@@ -1,4 +1,4 @@
-.PHONY: up down install migrate migrate-libtest test-db seed lint test test-unit test-contract test-invariant test-property test-e2e verify verify-chain
+.PHONY: up down install migrate migrate-libtest test-db seed lint test test-unit test-contract test-invariant test-property test-e2e verify verify-chain workers
 
 # Matches infra/docker-compose.yml's postgres service as seen from the
 # host (postgres/dev@localhost:5432/landrecords). Override for a
@@ -26,6 +26,9 @@ up: ## Bring up postgres+postgis, redis, minio, all 4 services, gateway.
 
 down:
 	cd infra && docker compose down
+
+workers: ## Bring up backend worker containers (ingestion, triage, decision, outbox-relay).
+	cd infra && docker compose up -d backend-ingestion backend-triage backend-decision backend-outbox-relay
 
 # ---- install ----
 
